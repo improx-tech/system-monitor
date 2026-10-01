@@ -28,7 +28,7 @@ export class OfflineQueue {
     this.queueFilePath = path.join(userDataPath, 'activities_queue.json');
     this.screensQueueFilePath = path.join(userDataPath, 'screenshots_queue.json');
 
-    if (!fs.existsSync(this.queueFilePath)) {
+    if (!fs.existsSync(this.queueFilePath)) {  
       fs.writeFileSync(this.queueFilePath, JSON.stringify([]));
     }
     if (!fs.existsSync(this.screensQueueFilePath)) {
