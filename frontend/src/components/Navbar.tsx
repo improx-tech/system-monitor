@@ -48,7 +48,7 @@ export const Navbar: React.FC = () => {
     <header className="h-16 bg-white border-b border-slate-200 px-6 flex items-center justify-between shrink-0 sticky top-0 z-20 shadow-xs">
       <div className="flex items-center gap-4">
         <h2 className="text-sm font-bold text-slate-800 tracking-tight">
-          {user?.role === 'EMPLOYEE' ? 'My Personal Workspace' : 'Management Console'}
+          {user?.role === 'EMPLOYEE' ? 'My Personal Workspace' : 'Management Console Log Update'}
         </h2>
 
         {isAdminOrHR && employees.length > 0 && (
