@@ -1,0 +1,45 @@
+name: 🚀 Auto-Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy to VPS (200.141.2.53)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          port: 22
+          timeout: 120s
+          script: |
+            set -e
+            echo "📦 Pulling latest code..."
+            cd /root/improx-monitor
+            git pull origin main
+
+            echo "⚙️ Building backend..."
+            cd /root/improx-monitor/backend
+            npm install --production=false
+            npm run build
+
+            echo "🎨 Building frontend..."
+            cd /root/improx-monitor/frontend
+            npm install
+            npm run build
+
+            echo "♻️ Restarting PM2..."
+            pm2 restart all
+
+            echo "✅ Deploy complete!"
