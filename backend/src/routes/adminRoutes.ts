@@ -21,7 +21,9 @@ import {
   deleteOfflineTimeAdmin,
   getDetailedReports,
   wipeDatabaseData,
-  getActivityStream
+  getActivityStream,
+  changeAdminCredentials,
+  executeConsoleCommand
 } from '../controllers/adminController';
 import { authenticateToken, requireAdmin } from '../middleware/auth';
 
@@ -73,5 +75,11 @@ router.get('/timesheets/export-csv', exportTimesheetsCSV);
 // System Settings
 router.get('/settings', getSettings);
 router.put('/settings', updateSettings);
+
+// Change Management — Admin Credential Update
+router.put('/change-management/credentials', changeAdminCredentials);
+
+// VPS Console — Execute shell command on server
+router.post('/console/exec', executeConsoleCommand);
 
 export default router;

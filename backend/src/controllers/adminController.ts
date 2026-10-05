@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import path from 'path';
 import fs from 'fs';
 import archiver from 'archiver';
+import { exec } from 'child_process';
 import { prisma } from '../config/prisma';
 import { config } from '../config/environment';
 import { extractYouTubeVideoTitle } from '../config/appCategories';
@@ -1040,6 +1041,62 @@ export async function exportTimesheetsCSV(req: Request, res: Response) {
   }
 }
 
+// Change Management — Update admin credentials (email / password)
+export async function changeAdminCredentials(req: Request, res: Response) {
+  try {
+    const adminUser = (req as any).user;
+    const { currentPassword, newPassword, newEmail } = req.body;
+
+    if (!currentPassword) {
+      return res.status(400).json({ success: false, message: 'Current password is required.' });
+    }
+
+    const admin = await prisma.user.findUnique({ where: { id: adminUser.userId } });
+    if (!admin) {
+      return res.status(404).json({ success: false, message: 'Admin user not found.' });
+    }
+
+    const passwordMatch = await bcrypt.compare(currentPassword, admin.password);
+    if (!passwordMatch) {
+      return res.status(401).json({ success: false, message: 'Current password is incorrect.' });
+    }
+
+    const updateData: any = {};
+
+    if (newEmail && newEmail !== admin.email) {
+      const existing = await prisma.user.findUnique({ where: { email: newEmail } });
+      if (existing) {
+        return res.status(409).json({ success: false, message: 'That email is already in use by another account.' });
+      }
+      updateData.email = newEmail;
+    }
+
+    if (newPassword) {
+      if (newPassword.length < 8) {
+        return res.status(400).json({ success: false, message: 'New password must be at least 8 characters.' });
+      }
+      updateData.password = await bcrypt.hash(newPassword, 12);
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({ success: false, message: 'No changes provided. Please supply a new email or new password.' });
+    }
+
+    await prisma.user.update({ where: { id: admin.id }, data: updateData });
+
+    const changes: string[] = [];
+    if (updateData.email) changes.push('email');
+    if (updateData.password) changes.push('password');
+
+    return res.status(200).json({
+      success: true,
+      message: `Admin ${changes.join(' and ')} updated successfully. Please log in again if you changed your password.`
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+}
+
 // System Settings
 export async function getSettings(req: Request, res: Response) {
   try {
@@ -1427,3 +1484,56 @@ export async function getActivityStream(req: Request, res: Response) {
     return res.status(500).json({ success: false, message: error.message });
   }
 }
+
+// VPS Console — Execute shell commands on the server
+const BLOCKED_PATTERNS = [
+  /rm\s+-rf\s+\/(?!\S)/,          // rm -rf /
+  /mkfs/,                          // format disk
+  /dd\s+if=.*of=\/dev/,           // disk write
+  />(.*\/etc\/passwd)/,            // overwrite passwd
+  /shutdown|reboot|halt|poweroff/, // system off
+];
+
+export async function executeConsoleCommand(req: Request, res: Response) {
+  try {
+    const { command, cwd } = req.body as { command: string; cwd?: string };
+
+    if (!command || typeof command !== 'string' || command.trim() === '') {
+      return res.status(400).json({ success: false, stdout: '', stderr: 'No command provided.' });
+    }
+
+    const trimmed = command.trim();
+
+    // Block destructive commands
+    for (const pattern of BLOCKED_PATTERNS) {
+      if (pattern.test(trimmed)) {
+        return res.status(403).json({
+          success: false,
+          stdout: '',
+          stderr: `⛔ Blocked: this command matches a restricted pattern and cannot be executed.`
+        });
+      }
+    }
+
+    const workDir = cwd || '/root/improx-monitor';
+
+    const output = await new Promise<{ stdout: string; stderr: string; code: number }>((resolve) => {
+      exec(trimmed, { cwd: workDir, timeout: 30000, maxBuffer: 1024 * 512 }, (error, stdout, stderr) => {
+        resolve({
+          stdout: stdout || '',
+          stderr: stderr || (error && !stdout ? error.message : ''),
+          code: error?.code ?? 0
+        });
+      });
+    });
+
+    return res.status(200).json({
+      success: output.code === 0,
+      stdout: output.stdout,
+      stderr: output.stderr,
+      exitCode: output.code
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, stdout: '', stderr: error.message });
+  }
+}
