@@ -1306,6 +1306,13 @@ if (ipcRenderer) {
       if (todayBreakTime && state.idleHoursFormatted) {
         todayBreakTime.textContent = state.idleHoursFormatted;
       }
+      if (typeof state.totalActiveSeconds === 'number' && state.totalActiveSeconds > 0) {
+        if (sessionSeconds === 0 || Math.abs(sessionSeconds - state.totalActiveSeconds) > 30) {
+          sessionSeconds = state.totalActiveSeconds;
+          if (todayTimer) todayTimer.textContent = formatTimerDisplay(sessionSeconds);
+          if (displayTaskDuration) displayTaskDuration.textContent = formatHoursMins(sessionSeconds);
+        }
+      }
       const kpiWork = document.getElementById('kpiTodayWork');
       const kpiBreak = document.getElementById('kpiTodayBreak');
       if (kpiWork && state.activeHoursFormatted) kpiWork.textContent = state.activeHoursFormatted;

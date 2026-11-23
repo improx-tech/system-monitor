@@ -1,17 +1,18 @@
 import { prisma } from '../config/prisma';
 import { socketService } from './socketService';
+import { getCompanyTodayString } from '../utils/timeZone';
 
 export function startHeartbeatSupervisor() {
   setInterval(async () => {
     try {
-      const staleThreshold = new Date(Date.now() - 45000); // 45 seconds timeout
-      const today = new Date().toISOString().split('T')[0];
+      const staleThreshold = new Date(Date.now() - 180000); // 3 minutes timeout (180s)
+      const today = getCompanyTodayString();
 
       const staleUsers = await prisma.user.findMany({
         where: {
           role: 'EMPLOYEE',
           isActive: true,
-          status: { in: ['ONLINE', 'IDLE'] },
+          status: { in: ['ONLINE', 'IDLE', 'PAUSED'] },
           OR: [
             { lastActiveAt: { lt: staleThreshold } },
             { lastActiveAt: null }
@@ -31,11 +32,10 @@ export function startHeartbeatSupervisor() {
           }
         });
 
-        // Set clock out time if not already clocked out
+        // Set clock out time on any open attendance record
         await prisma.attendance.updateMany({
           where: {
             userId: user.id,
-            date: today,
             clockOutAt: null
           },
           data: {

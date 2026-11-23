@@ -154,23 +154,34 @@ export class SyncService {
     }
   }
 
-  public async flushOfflineQueue() {
+  public async flushOfflineQueue(): Promise<{ totalActiveSeconds?: number; totalIdleSeconds?: number } | void> {
     if (!this.token) return;
 
-    const pendingActivities = await this.offlineQueue.getPendingActivities(50);
-    if (pendingActivities.length > 0) {
+    let latestActive: number | undefined;
+    let latestIdle: number | undefined;
+
+    // Drain up to 10 batches of 50 activities per flush
+    for (let batchNum = 0; batchNum < 10; batchNum++) {
+      const pendingActivities = await this.offlineQueue.getPendingActivities(50);
+      if (pendingActivities.length === 0) break;
+
       try {
         const batch = pendingActivities.map((p) => p.data);
-        await axios.post(
+        const res = await axios.post(
           `${this.serverUrl}/api/activity/upload`,
-          { activities: batch },
+          { activities: batch, isCatchUp: true },
           { headers: { Authorization: `Bearer ${this.token}` }, timeout: 15000 }
         );
 
         const ids = pendingActivities.map((p) => p.id);
         await this.offlineQueue.removeActivities(ids);
+
+        if (res.data) {
+          if (typeof res.data.totalActiveSeconds === 'number') latestActive = res.data.totalActiveSeconds;
+          if (typeof res.data.totalIdleSeconds === 'number') latestIdle = res.data.totalIdleSeconds;
+        }
       } catch (err) {
-        return;
+        break;
       }
     }
 
@@ -231,5 +242,21 @@ export class SyncService {
     } catch (e) {
       return null;
     }
+  }
+
+  public async getMyAttendanceToday(): Promise<{ totalActiveSeconds: number; totalIdleSeconds: number } | null> {
+    if (!this.token) return null;
+    try {
+      const res = await axios.get(`${this.serverUrl}/api/employee/timesheet`, {
+        headers: { Authorization: `Bearer ${this.token}` }
+      });
+      if (res.data && res.data.timesheet) {
+        return {
+          totalActiveSeconds: res.data.timesheet.totalActiveSeconds || Math.round((res.data.timesheet.activeHours || 0) * 3600),
+          totalIdleSeconds: res.data.timesheet.totalIdleSeconds || Math.round((res.data.timesheet.idleHours || 0) * 3600)
+        };
+      }
+    } catch (e) {}
+    return null;
   }
 }

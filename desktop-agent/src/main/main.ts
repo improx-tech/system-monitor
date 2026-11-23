@@ -41,6 +41,8 @@ class AgentApplication {
   private sampleDurationSeconds = 20; // 20 seconds sample duration (3 logs per min)
   private lastSample: TrackerSample | null = null;
   private lastScreenshotTime = 0;
+  private sleepStartTime = 0;
+  private lastTickTimestamp = Date.now();
 
   constructor() {
     this.offlineQueue = new OfflineQueue();
@@ -67,6 +69,7 @@ class AgentApplication {
         if (data.token) {
           this.syncService.setToken(data.token);
           this.currentUser = data.user;
+          this.refreshTodayAttendance();
         }
         if (data.screenshotInterval) this.screenshotIntervalMinutes = data.screenshotInterval;
         if (data.idleThreshold) this.idleThresholdMinutes = data.idleThreshold;
@@ -134,16 +137,50 @@ class AgentApplication {
     });
 
     powerMonitor.on('suspend', async () => {
-      if (this.isTracking && !this.isPaused) {
-        console.log('💤 Laptop entered sleep mode. Pausing tracking as Sleep Break.');
+      console.log('💤 Laptop entered sleep mode / screen turned off.');
+      if (this.isTracking) {
+        this.sleepStartTime = Date.now();
         this.pauseTracking('Sleep Break', 'System entered sleep / lid closed');
       }
     });
 
+    powerMonitor.on('lock-screen', async () => {
+      console.log('🔒 Screen locked / display off.');
+      if (this.isTracking && !this.sleepStartTime) {
+        this.sleepStartTime = Date.now();
+        this.pauseTracking('Screen Lock Break', 'Screen locked or display slept');
+      }
+    });
+
     powerMonitor.on('resume', async () => {
+      console.log('⏰ System woke up from sleep.');
       if (this.isTracking) {
-        console.log('⏰ System woke up from sleep. Resuming tracking.');
+        if (this.sleepStartTime > 0) {
+          const sleepDuration = Math.round((Date.now() - this.sleepStartTime) / 1000);
+          const startTime = new Date(this.sleepStartTime);
+          this.sleepStartTime = 0;
+          if (sleepDuration >= 5) {
+            await this.recordBreakTime(sleepDuration, 'Laptop Sleep Break', startTime);
+          }
+        }
         this.resumeTracking();
+      }
+    });
+
+    powerMonitor.on('unlock-screen', async () => {
+      console.log('🔓 Screen unlocked.');
+      if (this.isTracking) {
+        if (this.sleepStartTime > 0) {
+          const sleepDuration = Math.round((Date.now() - this.sleepStartTime) / 1000);
+          const startTime = new Date(this.sleepStartTime);
+          this.sleepStartTime = 0;
+          if (sleepDuration >= 5) {
+            await this.recordBreakTime(sleepDuration, 'Screen Lock Break', startTime);
+          }
+        }
+        if (this.isPaused && this.pauseReason.includes('Screen Lock')) {
+          this.resumeTracking();
+        }
       }
     });
   }
@@ -361,6 +398,62 @@ class AgentApplication {
     return `${hrs}h ${mins}m`;
   }
 
+  public async recordBreakTime(durationSeconds: number, reason: string, occurredAt: Date) {
+    if (durationSeconds <= 0) return;
+    console.log(`☕ Recording ${durationSeconds}s break for: ${reason}`);
+
+    this.totalIdleSeconds += durationSeconds;
+    this.notifyUIState();
+
+    const breakItem = {
+      appName: 'Break',
+      processName: 'System Sleep / Lock',
+      windowTitle: reason,
+      domain: null,
+      url: null,
+      taskName: this.currentTask || 'Break',
+      category: 'IDLE',
+      durationSeconds,
+      mouseClicks: 0,
+      keystrokes: 0,
+      isIdle: true,
+      recordedAt: occurredAt.toISOString()
+    };
+
+    try {
+      const res = await this.syncService.sendActivityBatch(
+        [breakItem],
+        0,
+        0,
+        'PAUSED',
+        true,
+        reason,
+        reason,
+        this.currentTask
+      );
+      if (res && res.success) {
+        if (typeof res.totalActiveSeconds === 'number') this.totalActiveSeconds = res.totalActiveSeconds;
+        if (typeof res.totalIdleSeconds === 'number') this.totalIdleSeconds = res.totalIdleSeconds;
+      }
+    } catch (e) {
+      await this.offlineQueue.enqueueActivity(breakItem).catch(() => {});
+    }
+
+    this.updateTrayMenu();
+    this.notifyUIState();
+  }
+
+  public async refreshTodayAttendance() {
+    try {
+      const att = await this.syncService.getMyAttendanceToday();
+      if (att) {
+        this.totalActiveSeconds = att.totalActiveSeconds;
+        this.totalIdleSeconds = att.totalIdleSeconds;
+        this.notifyUIState();
+      }
+    } catch (e) {}
+  }
+
   private notifyUIState() {
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       this.mainWindow.webContents.send('agent-state-changed', {
@@ -372,6 +465,8 @@ class AgentApplication {
         pauseComment: this.pauseComment,
         user: this.currentUser,
         serverUrl: this.serverUrl,
+        totalActiveSeconds: this.totalActiveSeconds,
+        totalIdleSeconds: this.totalIdleSeconds,
         activeHoursFormatted: this.formatSeconds(this.totalActiveSeconds),
         idleHoursFormatted: this.formatSeconds(this.totalIdleSeconds),
         userSettings: this.userSettings
@@ -525,6 +620,7 @@ class AgentApplication {
         }
 
         this.saveConfig();
+        await this.refreshTodayAttendance();
         // Standby mode: tracking starts manually when user types task note & presses Play/Start
         this.notifyUIState();
         return { success: true, user: data.user, isTracking: false };
@@ -543,8 +639,23 @@ class AgentApplication {
     this.notifyUIState();
     console.log('🟢 Tracking started for:', this.currentUser?.name, 'on task:', this.currentTask);
 
+    this.lastTickTimestamp = Date.now();
     // 1. Poll Native Tracker every 20 seconds
     this.activeWindowTimer = setInterval(async () => {
+      const now = Date.now();
+      const elapsedSinceLastTick = now - this.lastTickTimestamp;
+      this.lastTickTimestamp = now;
+
+      // Detect if system slept or froze between ticks
+      if (elapsedSinceLastTick > (this.sampleDurationSeconds * 1000 + 15000)) {
+        const sleepGapSeconds = Math.round((elapsedSinceLastTick - this.sampleDurationSeconds * 1000) / 1000);
+        if (sleepGapSeconds >= 10) {
+          const gapStartTime = new Date(now - elapsedSinceLastTick);
+          console.log(`⏳ Detected ${sleepGapSeconds}s gap between ticks (laptop was asleep). Crediting as break.`);
+          await this.recordBreakTime(sleepGapSeconds, 'Laptop Sleep / Inactive Break', gapStartTime);
+        }
+      }
+
       const sample = await this.tracker.getSample();
       this.lastSample = sample;
 
