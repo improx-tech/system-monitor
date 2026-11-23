@@ -58,7 +58,7 @@ export async function seedInitialAdmin() {
         data: {
           id: 'global',
           screenshotInterval: 10,
-          idleThreshold: 5,
+          idleThreshold: 1,
           retentionDays: 30,
           companyName: 'Improx Group'
         }

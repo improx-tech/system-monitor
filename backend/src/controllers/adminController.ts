@@ -1119,7 +1119,7 @@ export async function getSettings(req: Request, res: Response) {
         data: {
           id: 'global',
           screenshotInterval: 10,
-          idleThreshold: 5,
+          idleThreshold: 1,
           retentionDays: 30,
           companyName: 'Improx Group'
         }
@@ -1149,7 +1149,7 @@ export async function updateSettings(req: Request, res: Response) {
       create: {
         id: 'global',
         screenshotInterval: screenshotInterval ? parseInt(screenshotInterval, 10) : 10,
-        idleThreshold: idleThreshold ? parseInt(idleThreshold, 10) : 5,
+        idleThreshold: idleThreshold ? parseInt(idleThreshold, 10) : 1,
         retentionDays: retentionDays ? parseInt(retentionDays, 10) : 30,
         companyName: companyName || 'Improx Group'
       }

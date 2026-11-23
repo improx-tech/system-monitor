@@ -37,7 +37,7 @@ class AgentApplication {
   private screenshotTimer: NodeJS.Timeout | null = null;
 
   private screenshotIntervalMinutes = 10;
-  private idleThresholdMinutes = 3; // 3 minutes idle/break threshold
+  private idleThresholdMinutes = 1; // 1 minute idle/break threshold (detects black screen / away)
   private sampleDurationSeconds = 20; // 20 seconds sample duration (3 logs per min)
   private lastSample: TrackerSample | null = null;
   private lastScreenshotTime = 0;

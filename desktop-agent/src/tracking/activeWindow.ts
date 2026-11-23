@@ -113,10 +113,10 @@ export function extractDomainFromTitle(title: string): string | null {
 export class NativeTrackerSupervisor {
   private child: ChildProcess | null = null;
   private pendingResolves: Array<(sample: TrackerSample) => void> = [];
-  private idleThresholdSeconds = 180;
+  private idleThresholdSeconds = 60;
   private inputTracker: InputTracker;
 
-  constructor(idleThresholdMinutes = 3) {
+  constructor(idleThresholdMinutes = 1) {
     this.idleThresholdSeconds = idleThresholdMinutes * 60;
     this.inputTracker = new InputTracker(idleThresholdMinutes);
     this.spawnTrackerProcess();
@@ -213,22 +213,25 @@ export class NativeTrackerSupervisor {
 
     const metrics = this.inputTracker.getAndResetMetrics(20);
     const idleSeconds = powerMonitor ? powerMonitor.getSystemIdleTime() : 0;
-    const isIdle = metrics.isIdle || idleSeconds >= this.idleThresholdSeconds;
+    const fg = getForegroundWindowInfo();
+    const isLockScreen = fg.processName.toLowerCase() === 'lockapp.exe' || 
+                         fg.processName.toLowerCase() === 'logonui.exe' || 
+                         fg.processName.toLowerCase().endsWith('.scr');
+    const isIdle = metrics.isIdle || idleSeconds >= this.idleThresholdSeconds || isLockScreen;
 
     if (!this.child || !this.child.stdin) {
-      const fg = getForegroundWindowInfo();
       let domain: string | null = null;
       if (BROWSER_PROCESSES.includes(fg.processName.toLowerCase())) {
         domain = extractDomainFromTitle(fg.windowTitle);
       }
 
       return {
-        appName: fg.appName,
+        appName: isLockScreen ? 'Lock Screen' : (isIdle ? 'Away / Idle Break' : fg.appName),
         processName: fg.processName,
-        windowTitle: isIdle ? 'Away / Idle' : fg.windowTitle,
+        windowTitle: isLockScreen ? 'Screen Locked' : (isIdle ? 'Black Screen / Idle Break' : fg.windowTitle),
         domain,
-        clicks: metrics.clicks,
-        keys: metrics.keystrokes,
+        clicks: isIdle ? 0 : metrics.clicks,
+        keys: isIdle ? 0 : metrics.keystrokes,
         isIdle
       };
     }

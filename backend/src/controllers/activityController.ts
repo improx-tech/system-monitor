@@ -92,13 +92,30 @@ export async function uploadActivityBatch(req: AuthenticatedRequest, res: Respon
     // Group duration seconds by actual calendar date in company timezone
     const dateGroups: Record<string, { active: number; idle: number; pause: number; minTime: Date }> = {};
 
+    const isZeroInput = (clicksPerMinute === 0 || clicksPerMinute === undefined) && 
+                        (keysPerMinute === 0 || keysPerMinute === undefined);
+
     const createRecords = activities.map((item) => {
-      const activeTask = item.taskName || taskName || (isPaused ? (pauseReason || 'Break') : 'Active Task');
+      const isItemZeroInput = (item.mouseClicks === 0 || item.mouseClicks === undefined) &&
+                              (item.keystrokes === 0 || item.keystrokes === undefined);
+      const isLockOrDesktop = !item.appName ||
+                              item.appName === 'Desktop' ||
+                              item.appName === 'explorer.exe' ||
+                              item.appName === 'Unknown Application' ||
+                              item.processName?.toLowerCase() === 'lockapp.exe' ||
+                              item.processName?.toLowerCase() === 'logonui.exe' ||
+                              item.processName?.toLowerCase() === 'explorer.exe';
+
+      const isEffectiveIdle = !!item.isIdle || 
+                              currentStatus === 'IDLE' || 
+                              (isZeroInput && isItemZeroInput && isLockOrDesktop);
+
+      const activeTask = isEffectiveIdle ? 'Away / Idle Break' : (item.taskName || taskName || (isPaused ? (pauseReason || 'Break') : 'Active Task'));
       const { friendlyName, category } = resolveAppInfo(
         item.processName || item.appName,
         item.windowTitle,
         item.domain,
-        item.isIdle,
+        isEffectiveIdle,
         item.category
       );
 
@@ -114,7 +131,7 @@ export async function uploadActivityBatch(req: AuthenticatedRequest, res: Respon
 
       if (isPaused || currentStatus === 'PAUSED') {
         dateGroups[itemDate].pause += duration;
-      } else if (item.isIdle) {
+      } else if (isEffectiveIdle) {
         dateGroups[itemDate].idle += duration;
       } else {
         dateGroups[itemDate].active += duration;
@@ -122,18 +139,18 @@ export async function uploadActivityBatch(req: AuthenticatedRequest, res: Respon
 
       return {
         userId,
-        appName: friendlyName,
+        appName: isEffectiveIdle ? 'Away / Idle Break' : friendlyName,
         processName: item.processName || item.appName,
-        windowTitle: item.windowTitle || '',
+        windowTitle: isEffectiveIdle ? 'Screen Off / Inactivity Break' : (item.windowTitle || ''),
         domain: item.domain || null,
         url: item.url || null,
         taskName: activeTask,
         comment: item.comment || pauseComment || null,
-        category,
+        category: isEffectiveIdle ? 'IDLE' : category,
         durationSeconds: duration,
         mouseClicks: item.mouseClicks || 0,
         keystrokes: item.keystrokes || 0,
-        isIdle: !!item.isIdle,
+        isIdle: isEffectiveIdle,
         recordedAt: itemRecordTime
       };
     });
@@ -189,8 +206,11 @@ export async function uploadActivityBatch(req: AuthenticatedRequest, res: Respon
       latestItem.category
     );
 
-    const userStatus = isPaused ? 'PAUSED' : (currentStatus || (latestItem.isIdle ? 'IDLE' : 'ONLINE'));
-    const activeCurrentTask = taskName || latestItem.taskName || (isPaused ? (pauseReason || 'Break') : 'Active Task');
+    const anyItemIdle = createRecords.some(r => r.isIdle);
+    const userStatus = isPaused 
+      ? 'PAUSED' 
+      : ((anyItemIdle || currentStatus === 'IDLE') ? 'IDLE' : (currentStatus || 'ONLINE'));
+    const activeCurrentTask = taskName || latestItem.taskName || (isPaused ? (pauseReason || 'Break') : (userStatus === 'IDLE' ? 'Away / Idle Break' : 'Active Task'));
 
     if (!isCatchUp) {
       await prisma.user.update({
