@@ -75,11 +75,12 @@ export async function uploadActivityBatch(req: AuthenticatedRequest, res: Respon
         const latestAtt = await prisma.attendance.findUnique({
           where: { userId_date: { userId, date: todayStr } }
         });
+        const combinedBreaks = (latestAtt?.totalIdleSeconds || 0) + ((latestAtt as any)?.manualPauseSeconds || 0);
         return res.status(200).json({
           success: true,
           message: 'Status updated',
           totalActiveSeconds: latestAtt?.totalActiveSeconds || 0,
-          totalIdleSeconds: latestAtt?.totalIdleSeconds || 0
+          totalIdleSeconds: combinedBreaks
         });
       }
       return res.status(400).json({ success: false, message: 'Invalid or empty activity batch' });

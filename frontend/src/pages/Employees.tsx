@@ -311,7 +311,7 @@ export const Employees: React.FC = () => {
                       <span className="text-sm font-black text-amber-700">
                         {formatHoursToTime(
                           ((timelineData?.attendance?.totalIdleSeconds !== undefined && timelineData?.attendance?.totalIdleSeconds !== null)
-                            ? timelineData.attendance.totalIdleSeconds
+                            ? ((timelineData.attendance.totalIdleSeconds || 0) + ((timelineData.attendance as any).manualPauseSeconds || 0))
                             : ((selectedEmployee as any).totalIdleSeconds !== undefined)
                             ? (selectedEmployee as any).totalIdleSeconds
                             : Math.round((selectedEmployee.idleHoursToday || 0) * 3600)) / 3600

@@ -80,6 +80,13 @@ export function startHeartbeatSupervisor() {
                 pauseReason: user.pauseReason || 'Laptop Sleep Break'
               }
             });
+
+            socketService.broadcastLiveActivity(user.id, {
+              status: 'PAUSED',
+              pauseReason: user.pauseReason || 'Laptop Sleep Break',
+              totalIdleSeconds: (openAtt.totalIdleSeconds || 0) + (openAtt.manualPauseSeconds || 0) + 15,
+              lastActiveAt: user.lastActiveAt || now
+            });
           }
         }
       }
