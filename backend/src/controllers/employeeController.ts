@@ -3,6 +3,7 @@ import { AuthenticatedRequest } from '../middleware/auth';
 import { prisma } from '../config/prisma';
 import { buildTimelineIntervals } from './adminController';
 import { extractYouTubeVideoTitle } from '../config/appCategories';
+import { getCompanyTodayString, getDayBounds } from '../utils/timeZone';
 
 export async function getMyProfile(req: AuthenticatedRequest, res: Response) {
   try {
@@ -41,9 +42,8 @@ export async function getMyScreenshots(req: AuthenticatedRequest, res: Response)
     const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
-    const dateStr = (req.query.date as string) || new Date().toISOString().split('T')[0];
-    const startOfDay = new Date(dateStr + 'T00:00:00.000Z');
-    const endOfDay = new Date(dateStr + 'T23:59:59.999Z');
+    const dateStr = (req.query.date as string) || getCompanyTodayString();
+    const { startOfDay, endOfDay } = getDayBounds(dateStr);
 
     const screenshots = await prisma.screenshot.findMany({
       where: {
@@ -104,9 +104,8 @@ export async function getMyTimeline(req: AuthenticatedRequest, res: Response) {
     const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
-    const dateStr = (req.query.date as string) || new Date().toISOString().split('T')[0];
-    const startOfDay = new Date(dateStr + 'T00:00:00.000Z');
-    const endOfDay = new Date(dateStr + 'T23:59:59.999Z');
+    const dateStr = (req.query.date as string) || getCompanyTodayString();
+    const { startOfDay, endOfDay } = getDayBounds(dateStr);
 
     const [user, logs, attendance, screenshots, offlineTimes] = await Promise.all([
       prisma.user.findUnique({
@@ -168,7 +167,7 @@ export async function getMyTimesheet(req: AuthenticatedRequest, res: Response) {
     const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
-    const dateStr = (req.query.date as string) || new Date().toISOString().split('T')[0];
+    const dateStr = (req.query.date as string) || getCompanyTodayString();
 
     const attendance = await prisma.attendance.findUnique({
       where: { userId_date: { userId, date: dateStr } }
@@ -216,9 +215,8 @@ export async function getMyAnalytics(req: AuthenticatedRequest, res: Response) {
     const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
-    const dateStr = (req.query.date as string) || new Date().toISOString().split('T')[0];
-    const startOfDay = new Date(dateStr + 'T00:00:00.000Z');
-    const endOfDay = new Date(dateStr + 'T23:59:59.999Z');
+    const dateStr = (req.query.date as string) || getCompanyTodayString();
+    const { startOfDay, endOfDay } = getDayBounds(dateStr);
 
     const appUsage = await prisma.activityLog.groupBy({
       by: ['appName', 'category'],
@@ -348,7 +346,7 @@ export async function getMyOfflineTimes(req: AuthenticatedRequest, res: Response
     const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
-    const dateStr = (req.query.date as string) || new Date().toISOString().split('T')[0];
+    const dateStr = (req.query.date as string) || getCompanyTodayString();
     const records = await prisma.offlineTime.findMany({
       where: { userId, date: dateStr },
       orderBy: { startTime: 'asc' }
@@ -398,9 +396,8 @@ export async function getMyYouTubeHistory(req: AuthenticatedRequest, res: Respon
     const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
-    const dateStr = (req.query.date as string) || new Date().toISOString().split('T')[0];
-    const startOfDay = new Date(dateStr + 'T00:00:00.000Z');
-    const endOfDay = new Date(dateStr + 'T23:59:59.999Z');
+    const dateStr = (req.query.date as string) || getCompanyTodayString();
+    const { startOfDay, endOfDay } = getDayBounds(dateStr);
 
     const ytLogs = await prisma.activityLog.findMany({
       where: {

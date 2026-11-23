@@ -7,13 +7,13 @@ import { exec } from 'child_process';
 import { prisma } from '../config/prisma';
 import { config } from '../config/environment';
 import { extractYouTubeVideoTitle } from '../config/appCategories';
+import { getCompanyTodayString, getDayBounds } from '../utils/timeZone';
 
 // Dashboard Overview Statistics
 export async function getDashboardStats(req: Request, res: Response) {
   try {
-    const requestedDate = (req.query.date as string) || new Date().toISOString().split('T')[0];
-    const targetStart = new Date(requestedDate + 'T00:00:00.000Z');
-    const targetEnd = new Date(requestedDate + 'T23:59:59.999Z');
+    const requestedDate = (req.query.date as string) || getCompanyTodayString();
+    const { startOfDay: targetStart, endOfDay: targetEnd } = getDayBounds(requestedDate);
 
     // Headcount status
     const employees = await prisma.user.findMany({
@@ -73,10 +73,10 @@ export async function getDashboardStats(req: Request, res: Response) {
 
     // 7-Day Productivity Trend
     const past7Days: { date: string; activeHours: number; idleHours: number }[] = [];
+    const anchorDate = new Date();
     for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const dateStr = d.toISOString().split('T')[0];
+      const d = new Date(anchorDate.getTime() - i * 24 * 60 * 60 * 1000);
+      const dateStr = getCompanyTodayString(d);
 
       const dayRecords = await prisma.attendance.findMany({
         where: { date: dateStr }
@@ -120,7 +120,7 @@ export async function getDashboardStats(req: Request, res: Response) {
 // Employee Management CRUD
 export async function getEmployees(req: Request, res: Response) {
   try {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getCompanyTodayString();
     const employees = await prisma.user.findMany({
       where: { role: 'EMPLOYEE', isActive: true },
       select: {
@@ -732,9 +732,8 @@ export async function getActivityTimeline(req: Request, res: Response) {
       return res.status(400).json({ success: false, message: 'userId is required' });
     }
 
-    const queryDate = date || new Date().toISOString().split('T')[0];
-    const startOfDay = new Date(queryDate + 'T00:00:00.000Z');
-    const endOfDay = new Date(queryDate + 'T23:59:59.999Z');
+    const queryDate = date || getCompanyTodayString();
+    const { startOfDay, endOfDay } = getDayBounds(queryDate);
 
     const [user, logs, attendance, screenshots, offlineTimes] = await Promise.all([
       prisma.user.findUnique({
@@ -891,7 +890,7 @@ export async function getTimesheets(req: Request, res: Response) {
       department?: string;
     };
 
-    const queryDate = date || new Date().toISOString().split('T')[0];
+    const queryDate = date || getCompanyTodayString();
 
     const whereClause: any = {};
     if (startDate && endDate) {
@@ -991,7 +990,7 @@ export async function deleteTimesheet(req: Request, res: Response) {
 export async function exportTimesheetsCSV(req: Request, res: Response) {
   try {
     const { startDate, endDate, date } = req.query as { startDate?: string; endDate?: string; date?: string };
-    const queryDate = date || new Date().toISOString().split('T')[0];
+    const queryDate = date || getCompanyTodayString();
 
     const whereClause: any = {};
     if (startDate && endDate) {

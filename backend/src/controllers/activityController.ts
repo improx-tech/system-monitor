@@ -4,6 +4,7 @@ import { prisma } from '../config/prisma';
 import { resolveAppInfo } from '../config/appCategories';
 import { socketService } from '../services/socketService';
 import { config } from '../config/environment';
+import { getCompanyTodayString } from '../utils/timeZone';
 import path from 'path';
 
 export interface ActivityBatchItem {
@@ -29,7 +30,17 @@ export async function uploadActivityBatch(req: AuthenticatedRequest, res: Respon
       return res.status(401).json({ success: false, message: 'Unauthorized' });
     }
 
-    const { activities, currentStatus, isPaused, pauseReason, pauseComment, taskName, clicksPerMinute, keysPerMinute } = req.body as {
+    const {
+      activities,
+      currentStatus,
+      isPaused,
+      pauseReason,
+      pauseComment,
+      taskName,
+      clicksPerMinute,
+      keysPerMinute,
+      isCatchUp
+    } = req.body as {
       activities: ActivityBatchItem[];
       currentStatus?: 'ONLINE' | 'IDLE' | 'PAUSED';
       isPaused?: boolean;
@@ -38,6 +49,7 @@ export async function uploadActivityBatch(req: AuthenticatedRequest, res: Respon
       taskName?: string;
       clicksPerMinute?: number;
       keysPerMinute?: number;
+      isCatchUp?: boolean;
     };
 
     if (!activities || !Array.isArray(activities) || activities.length === 0) {
@@ -45,11 +57,10 @@ export async function uploadActivityBatch(req: AuthenticatedRequest, res: Respon
     }
 
     const now = new Date();
-    const today = now.toISOString().split('T')[0];
+    const todayCompany = getCompanyTodayString(now);
 
-    let batchActiveSeconds = 0;
-    let batchIdleSeconds = 0;
-    let batchPauseSeconds = 0;
+    // Group duration seconds by actual calendar date in company timezone
+    const dateGroups: Record<string, { active: number; idle: number; pause: number; minTime: Date }> = {};
 
     const createRecords = activities.map((item) => {
       const activeTask = item.taskName || taskName || (isPaused ? (pauseReason || 'Break') : 'Active Task');
@@ -62,12 +73,21 @@ export async function uploadActivityBatch(req: AuthenticatedRequest, res: Respon
       );
 
       const duration = item.durationSeconds || 5;
+      const itemRecordTime = item.recordedAt ? new Date(item.recordedAt) : now;
+      const itemDate = getCompanyTodayString(itemRecordTime);
+
+      if (!dateGroups[itemDate]) {
+        dateGroups[itemDate] = { active: 0, idle: 0, pause: 0, minTime: itemRecordTime };
+      } else if (itemRecordTime < dateGroups[itemDate].minTime) {
+        dateGroups[itemDate].minTime = itemRecordTime;
+      }
+
       if (isPaused || currentStatus === 'PAUSED') {
-        batchPauseSeconds += duration;
+        dateGroups[itemDate].pause += duration;
       } else if (item.isIdle) {
-        batchIdleSeconds += duration;
+        dateGroups[itemDate].idle += duration;
       } else {
-        batchActiveSeconds += duration;
+        dateGroups[itemDate].active += duration;
       }
 
       return {
@@ -84,7 +104,7 @@ export async function uploadActivityBatch(req: AuthenticatedRequest, res: Respon
         mouseClicks: item.mouseClicks || 0,
         keystrokes: item.keystrokes || 0,
         isIdle: !!item.isIdle,
-        recordedAt: item.recordedAt ? new Date(item.recordedAt) : now
+        recordedAt: itemRecordTime
       };
     });
 
@@ -92,6 +112,44 @@ export async function uploadActivityBatch(req: AuthenticatedRequest, res: Respon
       data: createRecords
     });
 
+    // Update Attendance per date accurately
+    for (const [dateKey, stats] of Object.entries(dateGroups)) {
+      const totalSec = stats.active + stats.idle + stats.pause;
+      let existingAtt = await prisma.attendance.findUnique({
+        where: { userId_date: { userId, date: dateKey } }
+      });
+
+      if (!existingAtt) {
+        await prisma.attendance.create({
+          data: {
+            userId,
+            date: dateKey,
+            clockInAt: stats.minTime,
+            clockOutAt: isCatchUp ? now : null,
+            totalActiveSeconds: stats.active,
+            totalIdleSeconds: stats.idle,
+            manualPauseSeconds: stats.pause,
+            totalWorkSeconds: totalSec,
+            status: 'PRESENT',
+            pauseReason: isPaused ? (pauseReason || 'Break') : null
+          }
+        });
+      } else {
+        await prisma.attendance.update({
+          where: { id: existingAtt.id },
+          data: {
+            ...(isCatchUp ? {} : { clockOutAt: null }),
+            totalActiveSeconds: { increment: stats.active },
+            totalIdleSeconds: { increment: stats.idle },
+            manualPauseSeconds: { increment: stats.pause },
+            totalWorkSeconds: { increment: totalSec },
+            ...(isCatchUp ? {} : { pauseReason: isPaused ? (pauseReason || 'Break') : null })
+          }
+        });
+      }
+    }
+
+    // Only update Live status if this is NOT a historical catch-up batch
     const latestItem = activities[activities.length - 1];
     const resolvedLatest = resolveAppInfo(
       latestItem.processName || latestItem.appName,
@@ -104,77 +162,46 @@ export async function uploadActivityBatch(req: AuthenticatedRequest, res: Respon
     const userStatus = isPaused ? 'PAUSED' : (currentStatus || (latestItem.isIdle ? 'IDLE' : 'ONLINE'));
     const activeCurrentTask = taskName || latestItem.taskName || (isPaused ? (pauseReason || 'Break') : 'Active Task');
 
-    await prisma.user.update({
-      where: { id: userId },
-      data: {
+    if (!isCatchUp) {
+      await prisma.user.update({
+        where: { id: userId },
+        data: {
+          status: userStatus,
+          pauseReason: isPaused ? (pauseReason || 'Break') : null,
+          pauseComment: isPaused ? (pauseComment || null) : null,
+          currentTask: activeCurrentTask,
+          lastActiveAt: now,
+          currentApp: resolvedLatest.friendlyName,
+          currentTitle: latestItem.windowTitle || null,
+          currentDomain: latestItem.domain || null
+        }
+      });
+
+      socketService.broadcastLiveActivity(userId, {
         status: userStatus,
         pauseReason: isPaused ? (pauseReason || 'Break') : null,
         pauseComment: isPaused ? (pauseComment || null) : null,
         currentTask: activeCurrentTask,
-        lastActiveAt: now,
         currentApp: resolvedLatest.friendlyName,
-        currentTitle: latestItem.windowTitle || null,
-        currentDomain: latestItem.domain || null
-      }
-    });
-
-    // Find active shift today or open shift
-    let activeAtt = await prisma.attendance.findFirst({
-      where: {
-        userId,
-        OR: [{ date: today }, { clockOutAt: null }]
-      },
-      orderBy: { createdAt: 'desc' }
-    });
-
-    if (!activeAtt) {
-      activeAtt = await prisma.attendance.create({
-        data: {
-          userId,
-          date: today,
-          clockInAt: now,
-          clockOutAt: null,
-          totalActiveSeconds: batchActiveSeconds,
-          totalIdleSeconds: batchIdleSeconds,
-          manualPauseSeconds: batchPauseSeconds,
-          totalWorkSeconds: batchActiveSeconds + batchIdleSeconds + batchPauseSeconds,
-          status: 'PRESENT',
-          pauseReason: isPaused ? (pauseReason || 'Break') : null
-        }
-      });
-    } else {
-      activeAtt = await prisma.attendance.update({
-        where: { id: activeAtt.id },
-        data: {
-          clockOutAt: null, // Clear Clock Out so employee is ACTIVE again!
-          totalActiveSeconds: { increment: batchActiveSeconds },
-          totalIdleSeconds: { increment: batchIdleSeconds },
-          manualPauseSeconds: { increment: batchPauseSeconds },
-          totalWorkSeconds: { increment: batchActiveSeconds + batchIdleSeconds + batchPauseSeconds },
-          pauseReason: isPaused ? (pauseReason || 'Break') : null // Clear pauseReason when resumed!
-        }
+        currentTitle: latestItem.windowTitle,
+        currentDomain: latestItem.domain,
+        clicksPerMinute: clicksPerMinute || 0,
+        keysPerMinute: keysPerMinute || 0,
+        lastActiveAt: now
       });
     }
 
-    socketService.broadcastLiveActivity(userId, {
-      status: userStatus,
-      pauseReason: isPaused ? (pauseReason || 'Break') : null,
-      pauseComment: isPaused ? (pauseComment || null) : null,
-      currentTask: activeCurrentTask,
-      currentApp: resolvedLatest.friendlyName,
-      currentTitle: latestItem.windowTitle,
-      currentDomain: latestItem.domain,
-      clicksPerMinute: clicksPerMinute || 0,
-      keysPerMinute: keysPerMinute || 0,
-      lastActiveAt: now
+    // Fetch latest attendance for today's stats response to agent
+    const todayAtt = await prisma.attendance.findUnique({
+      where: { userId_date: { userId, date: todayCompany } }
     });
 
-    const totalBreaks = (activeAtt.totalIdleSeconds || 0) + ((activeAtt as any).manualPauseSeconds || 0);
+    const totalBreaks = (todayAtt?.totalIdleSeconds || 0) + ((todayAtt as any)?.manualPauseSeconds || 0);
 
     return res.status(200).json({
       success: true,
       message: 'Processed ' + activities.length + ' activity entries',
-      totalActiveSeconds: activeAtt.totalActiveSeconds,
+      totalActiveSeconds: todayAtt?.totalActiveSeconds || 0,
       totalIdleSeconds: totalBreaks
     });
   } catch (error: any) {
