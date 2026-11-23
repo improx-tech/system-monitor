@@ -307,7 +307,7 @@ function renderDesktopTimeline(data, dateStr) {
       })
     : (data.intervals || []);
 
-  const baseUrl = (serverUrlInput && serverUrlInput.value ? serverUrlInput.value : 'http://200.141.2.53').trim().replace(/\/$/, '');
+  const baseUrl = (serverUrlInput && serverUrlInput.value ? serverUrlInput.value : 'https://monitor.improxtech.com').trim().replace(/\/$/, '');
 
   container.innerHTML = `
     <!-- Attendance Overview Strip -->
@@ -455,7 +455,7 @@ async function loadDesktopScreenshots(dateStr) {
       return;
     }
 
-    const baseUrl = (serverUrlInput && serverUrlInput.value ? serverUrlInput.value : 'http://200.141.2.53').trim().replace(/\/$/, '');
+    const baseUrl = (serverUrlInput && serverUrlInput.value ? serverUrlInput.value : 'https://monitor.improxtech.com').trim().replace(/\/$/, '');
 
     container.innerHTML = list.map((s) => {
       const imgUrl = s.filePath.startsWith('http') ? s.filePath : `${baseUrl}${s.filePath}`;
@@ -1177,7 +1177,7 @@ async function handleLoginSubmit(e) {
   if (errorBox) errorBox.classList.add('hidden');
   if (successBox) successBox.classList.add('hidden');
 
-  let serverUrl = (serverUrlInput.value || 'http://200.141.2.53').trim().replace(/\/$/, '');
+  let serverUrl = (serverUrlInput.value || 'https://monitor.improxtech.com').trim().replace(/\/$/, '');
   if (!serverUrl.startsWith('http://') && !serverUrl.startsWith('https://')) {
     serverUrl = 'http://' + serverUrl;
   }
