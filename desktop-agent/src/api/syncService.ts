@@ -88,7 +88,7 @@ export class SyncService {
     pauseComment?: string,
     taskName?: string
   ): Promise<{ success: boolean; totalActiveSeconds?: number; totalIdleSeconds?: number }> {
-    if (!this.token || activities.length === 0) return { success: false };
+    if (!this.token || (activities.length === 0 && !isPaused && !currentStatus)) return { success: false };
 
     try {
       const response = await axios.post(

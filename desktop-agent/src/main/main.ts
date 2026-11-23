@@ -37,7 +37,7 @@ class AgentApplication {
   private screenshotTimer: NodeJS.Timeout | null = null;
 
   private screenshotIntervalMinutes = 10;
-  private idleThresholdMinutes = 3; // 3 minutes idle/break threshold
+  private idleThresholdMinutes = 1; // 1 minute idle/break threshold (detects black screen / away)
   private sampleDurationSeconds = 20; // 20 seconds sample duration (3 logs per min)
   private lastSample: TrackerSample | null = null;
   private lastScreenshotTime = 0;
@@ -141,6 +141,7 @@ class AgentApplication {
       if (this.isTracking) {
         this.sleepStartTime = Date.now();
         this.pauseTracking('Sleep Break', 'System entered sleep / lid closed');
+        this.sendPauseBeacon('Sleep Break');
       }
     });
 
@@ -149,20 +150,15 @@ class AgentApplication {
       if (this.isTracking && !this.sleepStartTime) {
         this.sleepStartTime = Date.now();
         this.pauseTracking('Screen Lock Break', 'Screen locked or display slept');
+        this.sendPauseBeacon('Screen Lock Break');
       }
     });
 
     powerMonitor.on('resume', async () => {
       console.log('⏰ System woke up from sleep.');
       if (this.isTracking) {
-        if (this.sleepStartTime > 0) {
-          const sleepDuration = Math.round((Date.now() - this.sleepStartTime) / 1000);
-          const startTime = new Date(this.sleepStartTime);
-          this.sleepStartTime = 0;
-          if (sleepDuration >= 5) {
-            await this.recordBreakTime(sleepDuration, 'Laptop Sleep Break', startTime);
-          }
-        }
+        this.sleepStartTime = 0;
+        await this.refreshTodayAttendance();
         this.resumeTracking();
       }
     });
@@ -170,14 +166,8 @@ class AgentApplication {
     powerMonitor.on('unlock-screen', async () => {
       console.log('🔓 Screen unlocked.');
       if (this.isTracking) {
-        if (this.sleepStartTime > 0) {
-          const sleepDuration = Math.round((Date.now() - this.sleepStartTime) / 1000);
-          const startTime = new Date(this.sleepStartTime);
-          this.sleepStartTime = 0;
-          if (sleepDuration >= 5) {
-            await this.recordBreakTime(sleepDuration, 'Screen Lock Break', startTime);
-          }
-        }
+        this.sleepStartTime = 0;
+        await this.refreshTodayAttendance();
         if (this.isPaused && this.pauseReason.includes('Screen Lock')) {
           this.resumeTracking();
         }
@@ -389,7 +379,24 @@ class AgentApplication {
     this.pauseComment = '';
     this.updateTrayMenu();
     this.notifyUIState();
+    this.sendResumeBeacon().catch(() => {});
     console.log('🟢 Tracking resumed');
+  }
+
+  private async sendResumeBeacon() {
+    if (!this.syncService) return;
+    try {
+      await this.syncService.sendActivityBatch(
+        [],
+        0,
+        0,
+        'ONLINE',
+        false,
+        '',
+        '',
+        this.currentTask
+      );
+    } catch (e) {}
   }
 
   private formatSeconds(sec: number): string {
@@ -441,6 +448,22 @@ class AgentApplication {
 
     this.updateTrayMenu();
     this.notifyUIState();
+  }
+
+  private async sendPauseBeacon(reason: string) {
+    if (!this.syncService) return;
+    try {
+      await this.syncService.sendActivityBatch(
+        [],
+        0,
+        0,
+        'PAUSED',
+        true,
+        reason,
+        reason,
+        this.currentTask
+      );
+    } catch (e) {}
   }
 
   public async refreshTodayAttendance() {

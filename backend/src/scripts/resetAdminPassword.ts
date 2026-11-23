@@ -2,47 +2,57 @@ import 'dotenv/config';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../config/prisma';
 
-async function resetAdmin() {
-  const adminEmail = 'monitoradmin@improxgroup.com1234';
-  const adminPass = '#admin0089000#';
-  const hashedPassword = await bcrypt.hash(adminPass, 10);
+async function resetAdmins() {
+  const adminAccounts = [
+    {
+      email: 'admin@improx.com',
+      pass: 'Admin@123456',
+      name: 'System Admin'
+    },
+    {
+      email: 'monitoradmin@improxgroup.com1234',
+      pass: '#admin0089000#',
+      name: 'Super Admin'
+    }
+  ];
 
-  // First check if an admin account with role ADMIN exists
-  const existingAdmin = await prisma.user.findFirst({ where: { role: 'ADMIN' } });
+  for (const acc of adminAccounts) {
+    const hashedPassword = await bcrypt.hash(acc.pass, 10);
+    const existing = await prisma.user.findUnique({ where: { email: acc.email } });
 
-  if (existingAdmin) {
-    await prisma.user.update({
-      where: { id: existingAdmin.id },
-      data: {
-        name: 'Super Admin',
-        email: adminEmail,
-        password: hashedPassword,
-        role: 'ADMIN',
-        isActive: true,
-        status: 'OFFLINE'
-      }
-    });
-    console.log(`✅ Super Admin account set to: ${adminEmail} / ${adminPass}`);
-  } else {
-    await prisma.user.create({
-      data: {
-        name: 'Super Admin',
-        email: adminEmail,
-        password: hashedPassword,
-        role: 'ADMIN',
-        department: 'Executive',
-        shift: 'General',
-        isActive: true,
-        status: 'OFFLINE'
-      }
-    });
-    console.log(`✅ Super Admin created: ${adminEmail} / ${adminPass}`);
+    if (existing) {
+      await prisma.user.update({
+        where: { id: existing.id },
+        data: {
+          name: acc.name,
+          password: hashedPassword,
+          role: 'ADMIN',
+          isActive: true,
+          status: 'OFFLINE'
+        }
+      });
+      console.log(`✅ ${acc.name} updated: ${acc.email} / ${acc.pass}`);
+    } else {
+      await prisma.user.create({
+        data: {
+          name: acc.name,
+          email: acc.email,
+          password: hashedPassword,
+          role: 'ADMIN',
+          department: 'Executive',
+          shift: 'General',
+          isActive: true,
+          status: 'OFFLINE'
+        }
+      });
+      console.log(`✅ ${acc.name} created: ${acc.email} / ${acc.pass}`);
+    }
   }
 
   process.exit(0);
 }
 
-resetAdmin().catch((err) => {
-  console.error('Failed to reset admin password:', err);
+resetAdmins().catch((err) => {
+  console.error('Failed to reset admin passwords:', err);
   process.exit(1);
 });

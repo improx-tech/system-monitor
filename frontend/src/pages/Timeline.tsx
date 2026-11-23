@@ -171,7 +171,7 @@ export const Timeline: React.FC = () => {
               <div>
                 <p className="text-[10px] uppercase font-bold text-slate-400">Break & Idle Time</p>
                 <p className="text-sm font-black text-slate-900">
-                  {formatHoursToTime((timelineData.attendance?.totalIdleSeconds || 0) / 3600)}
+                  {formatHoursToTime((((timelineData.attendance?.totalIdleSeconds || 0) + ((timelineData.attendance as any)?.manualPauseSeconds || 0))) / 3600)}
                 </p>
               </div>
             </div>

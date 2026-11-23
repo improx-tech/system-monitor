@@ -1,7 +1,73 @@
 import { spawn, ChildProcess } from 'child_process';
 import path from 'path';
 import fs from 'fs';
-import { app } from 'electron';
+import { app, powerMonitor } from 'electron';
+import { InputTracker } from './inputTracker';
+
+let GetForegroundWindow: any = null;
+let GetWindowTextW: any = null;
+let GetWindowThreadProcessId: any = null;
+let OpenProcess: any = null;
+let QueryFullProcessImageNameW: any = null;
+let CloseHandle: any = null;
+
+if (process.platform === 'win32') {
+  try {
+    const koffi = require('koffi');
+    const user32 = koffi.load('user32.dll');
+    const kernel32 = koffi.load('kernel32.dll');
+    GetForegroundWindow = user32.func('void* GetForegroundWindow()');
+    GetWindowTextW = user32.func('int GetWindowTextW(void* hWnd, _Out_ char16_t* lpString, int nMaxCount)');
+    GetWindowThreadProcessId = user32.func('uint32_t GetWindowThreadProcessId(void* hWnd, _Out_ uint32_t* lpdwProcessId)');
+    OpenProcess = kernel32.func('void* OpenProcess(uint32_t dwDesiredAccess, int bInheritHandle, uint32_t dwProcessId)');
+    QueryFullProcessImageNameW = kernel32.func('int QueryFullProcessImageNameW(void* hProcess, uint32_t dwFlags, _Out_ char16_t* lpExeName, _Inout_ uint32_t* lpdwSize)');
+    CloseHandle = kernel32.func('int CloseHandle(void* hObject)');
+  } catch (e) {
+    console.warn('Native Win32 loader warning in activeWindow:', e);
+  }
+}
+
+function getForegroundWindowInfo(): { appName: string; processName: string; windowTitle: string } {
+  if (process.platform !== 'win32' || !GetForegroundWindow) {
+    return { appName: 'Desktop', processName: 'explorer.exe', windowTitle: 'Desktop' };
+  }
+
+  try {
+    const hwnd = GetForegroundWindow();
+    if (!hwnd) {
+      return { appName: 'Desktop', processName: 'explorer.exe', windowTitle: 'Desktop' };
+    }
+
+    const titleBuf = Buffer.alloc(1024);
+    const titleLen = GetWindowTextW(hwnd, titleBuf, 512);
+    const windowTitle = titleLen > 0 ? titleBuf.toString('utf16le', 0, titleLen * 2).trim() : 'Active Window';
+
+    let processName = 'explorer.exe';
+    const pidBuf = [0];
+    GetWindowThreadProcessId(hwnd, pidBuf);
+    const pid = pidBuf[0];
+
+    if (pid > 0 && OpenProcess && QueryFullProcessImageNameW && CloseHandle) {
+      const hProc = OpenProcess(0x1000, 0, pid);
+      if (hProc) {
+        const pathBuf = Buffer.alloc(1024);
+        const sizeBuf = [512];
+        if (QueryFullProcessImageNameW(hProc, 0, pathBuf, sizeBuf)) {
+          const fullPath = pathBuf.toString('utf16le', 0, sizeBuf[0] * 2);
+          if (fullPath) {
+            processName = path.basename(fullPath);
+          }
+        }
+        CloseHandle(hProc);
+      }
+    }
+
+    const appName = processName.replace(/\.exe$/i, '');
+    return { appName, processName, windowTitle };
+  } catch (e) {
+    return { appName: 'Desktop', processName: 'explorer.exe', windowTitle: 'Desktop' };
+  }
+}
 
 export interface TrackerSample {
   appName: string;
@@ -47,10 +113,12 @@ export function extractDomainFromTitle(title: string): string | null {
 export class NativeTrackerSupervisor {
   private child: ChildProcess | null = null;
   private pendingResolves: Array<(sample: TrackerSample) => void> = [];
-  private idleThresholdSeconds = 180;
+  private idleThresholdSeconds = 60;
+  private inputTracker: InputTracker;
 
-  constructor(idleThresholdMinutes = 3) {
+  constructor(idleThresholdMinutes = 1) {
     this.idleThresholdSeconds = idleThresholdMinutes * 60;
+    this.inputTracker = new InputTracker(idleThresholdMinutes);
     this.spawnTrackerProcess();
   }
 
@@ -135,6 +203,7 @@ export class NativeTrackerSupervisor {
 
   public setIdleThreshold(minutes: number) {
     this.idleThresholdSeconds = minutes * 60;
+    this.inputTracker.setIdleThreshold(minutes);
   }
 
   public async getSample(): Promise<TrackerSample> {
@@ -142,15 +211,28 @@ export class NativeTrackerSupervisor {
       return this.getMacSample();
     }
 
+    const metrics = this.inputTracker.getAndResetMetrics(20);
+    const idleSeconds = powerMonitor ? powerMonitor.getSystemIdleTime() : 0;
+    const fg = getForegroundWindowInfo();
+    const isLockScreen = fg.processName.toLowerCase() === 'lockapp.exe' || 
+                         fg.processName.toLowerCase() === 'logonui.exe' || 
+                         fg.processName.toLowerCase().endsWith('.scr');
+    const isIdle = metrics.isIdle || idleSeconds >= this.idleThresholdSeconds || isLockScreen;
+
     if (!this.child || !this.child.stdin) {
+      let domain: string | null = null;
+      if (BROWSER_PROCESSES.includes(fg.processName.toLowerCase())) {
+        domain = extractDomainFromTitle(fg.windowTitle);
+      }
+
       return {
-        appName: 'Desktop',
-        processName: 'explorer.exe',
-        windowTitle: 'Desktop',
-        domain: null,
-        clicks: 0,
-        keys: 0,
-        isIdle: false
+        appName: isLockScreen ? 'Lock Screen' : (isIdle ? 'Away / Idle Break' : fg.appName),
+        processName: fg.processName,
+        windowTitle: isLockScreen ? 'Screen Locked' : (isIdle ? 'Black Screen / Idle Break' : fg.windowTitle),
+        domain,
+        clicks: isIdle ? 0 : metrics.clicks,
+        keys: isIdle ? 0 : metrics.keystrokes,
+        isIdle
       };
     }
 
@@ -162,14 +244,15 @@ export class NativeTrackerSupervisor {
         const idx = this.pendingResolves.indexOf(resolve);
         if (idx !== -1) {
           this.pendingResolves.splice(idx, 1);
+          const fg = getForegroundWindowInfo();
           resolve({
-            appName: 'Desktop',
-            processName: 'explorer.exe',
-            windowTitle: 'Desktop',
-            domain: null,
-            clicks: 0,
-            keys: 0,
-            isIdle: false
+            appName: fg.appName,
+            processName: fg.processName,
+            windowTitle: isIdle ? 'Away / Idle' : fg.windowTitle,
+            domain: extractDomainFromTitle(fg.windowTitle),
+            clicks: metrics.clicks,
+            keys: metrics.keystrokes,
+            isIdle
           });
         }
       }, 1500);
@@ -226,6 +309,7 @@ export class NativeTrackerSupervisor {
   }
 
   public destroy() {
+    this.inputTracker.destroy();
     if (this.child) {
       try {
         this.child.stdin?.write('exit\n');

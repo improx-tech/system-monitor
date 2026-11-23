@@ -32,7 +32,7 @@ export async function getDashboardStats(req: Request, res: Response) {
     });
 
     const totalActiveSecondsToday = dateAttendances.reduce((sum, a) => sum + a.totalActiveSeconds, 0);
-    const totalIdleSecondsToday = dateAttendances.reduce((sum, a) => sum + a.totalIdleSeconds, 0);
+    const totalIdleSecondsToday = dateAttendances.reduce((sum, a) => sum + (a.totalIdleSeconds || 0) + ((a as any).manualPauseSeconds || 0), 0);
     const totalWorkSecondsToday = totalActiveSecondsToday + totalIdleSecondsToday;
 
     // Top Apps for selected date
@@ -83,7 +83,7 @@ export async function getDashboardStats(req: Request, res: Response) {
       });
 
       const dayActiveSec = dayRecords.reduce((sum, r) => sum + r.totalActiveSeconds, 0);
-      const dayIdleSec = dayRecords.reduce((sum, r) => sum + r.totalIdleSeconds, 0);
+      const dayIdleSec = dayRecords.reduce((sum, r) => sum + (r.totalIdleSeconds || 0) + ((r as any).manualPauseSeconds || 0), 0);
 
       past7Days.push({
         date: dateStr,
@@ -142,6 +142,7 @@ export async function getEmployees(req: Request, res: Response) {
             clockOutAt: true,
             totalActiveSeconds: true,
             totalIdleSeconds: true,
+            manualPauseSeconds: true,
             totalWorkSeconds: true
           }
         }
@@ -151,6 +152,7 @@ export async function getEmployees(req: Request, res: Response) {
 
     const formatted = employees.map(emp => {
       const att = emp.attendances[0];
+      const combinedBreakIdle = (att?.totalIdleSeconds || 0) + ((att as any)?.manualPauseSeconds || 0);
       return {
         id: emp.id,
         name: emp.name,
@@ -164,8 +166,12 @@ export async function getEmployees(req: Request, res: Response) {
         currentDomain: emp.currentDomain,
         clockInAt: att?.clockInAt || null,
         clockOutAt: att?.clockOutAt || null,
+        totalActiveSeconds: att?.totalActiveSeconds || 0,
+        totalIdleSeconds: combinedBreakIdle,
+        manualPauseSeconds: (att as any)?.manualPauseSeconds || 0,
+        totalWorkSeconds: att?.totalWorkSeconds || 0,
         activeHoursToday: att ? parseFloat((att.totalActiveSeconds / 3600).toFixed(2)) : 0,
-        idleHoursToday: att ? parseFloat((att.totalIdleSeconds / 3600).toFixed(2)) : 0,
+        idleHoursToday: att ? parseFloat((combinedBreakIdle / 3600).toFixed(2)) : 0,
         totalHoursToday: att ? parseFloat((att.totalWorkSeconds / 3600).toFixed(2)) : 0,
         createdAt: emp.createdAt
       };
@@ -773,15 +779,22 @@ export async function getActivityTimeline(req: Request, res: Response) {
 
     const intervals = buildTimelineIntervals(logs, screenshots, offlineTimes);
 
+    const combinedIdleSeconds = (attendance?.totalIdleSeconds || 0) + ((attendance as any)?.manualPauseSeconds || 0);
+
     return res.status(200).json({
       success: true,
       user,
       date: queryDate,
-      attendance: attendance || {
+      attendance: attendance ? {
+        ...attendance,
+        totalIdleSeconds: combinedIdleSeconds,
+        manualPauseSeconds: (attendance as any).manualPauseSeconds || 0
+      } : {
         clockInAt: null,
         clockOutAt: null,
         totalActiveSeconds: 0,
         totalIdleSeconds: 0,
+        manualPauseSeconds: 0,
         totalWorkSeconds: 0
       },
       activityBlocks: logs,
@@ -1008,7 +1021,8 @@ export async function exportTimesheetsCSV(req: Request, res: Response) {
     const headers = ['Employee Name', 'Email', 'Department', 'Shift', 'Date', 'Clock In', 'Clock Out', 'Active Hours', 'Idle Hours', 'Total Hours', 'Productivity %', 'Status'];
     const rows = records.map(r => {
       const act = (r.totalActiveSeconds / 3600).toFixed(2);
-      const idl = (r.totalIdleSeconds / 3600).toFixed(2);
+      const totalBreakSec = (r.totalIdleSeconds || 0) + ((r as any).manualPauseSeconds || 0);
+      const idl = (totalBreakSec / 3600).toFixed(2);
       const tot = (r.totalWorkSeconds / 3600).toFixed(2);
       const score = Number(tot) > 0 ? Math.round((Number(act) / Number(tot)) * 100) : 0;
       const inTime = r.clockInAt ? new Date(r.clockInAt).toLocaleTimeString() : 'N/A';
@@ -1105,7 +1119,7 @@ export async function getSettings(req: Request, res: Response) {
         data: {
           id: 'global',
           screenshotInterval: 10,
-          idleThreshold: 5,
+          idleThreshold: 1,
           retentionDays: 30,
           companyName: 'Improx Group'
         }
@@ -1135,7 +1149,7 @@ export async function updateSettings(req: Request, res: Response) {
       create: {
         id: 'global',
         screenshotInterval: screenshotInterval ? parseInt(screenshotInterval, 10) : 10,
-        idleThreshold: idleThreshold ? parseInt(idleThreshold, 10) : 5,
+        idleThreshold: idleThreshold ? parseInt(idleThreshold, 10) : 1,
         retentionDays: retentionDays ? parseInt(retentionDays, 10) : 30,
         companyName: companyName || 'Improx Group'
       }
