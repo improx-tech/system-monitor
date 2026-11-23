@@ -80,12 +80,12 @@ export const Employees: React.FC = () => {
 
   useEffect(() => {
     fetchEmployees();
-    const interval = setInterval(fetchEmployees, 10000);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
     fetchSelectedEmployeeTimeline();
+    const interval = setInterval(() => {
+      fetchEmployees();
+      fetchSelectedEmployeeTimeline();
+    }, 5000);
+    return () => clearInterval(interval);
   }, [selectedUserId, selectedDate]);
 
   const handleDelete = async (id: string, name: string) => {
@@ -284,7 +284,7 @@ export const Employees: React.FC = () => {
                       }`}>
                         {selectedEmployee.status === 'ONLINE' || (selectedEmployee.status as string) === 'WORKING'
                           ? '🟢 Active Working'
-                          : selectedEmployee.status === 'PAUSED'
+                          : selectedEmployee.status === 'PAUSED' || selectedEmployee.status === 'IDLE'
                           ? '🟡 On Break'
                           : '🔴 Logged Out'}
                       </span>
@@ -296,14 +296,26 @@ export const Employees: React.FC = () => {
                     <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 text-xs">
                       <span className="text-[10px] font-bold text-slate-400 uppercase block">Active Software</span>
                       <span className="text-sm font-black text-slate-900">
-                        {formatHoursToTime((timelineData?.attendance?.totalActiveSeconds || 0) / 3600)}
+                        {formatHoursToTime(
+                          ((timelineData?.attendance?.totalActiveSeconds !== undefined && timelineData?.attendance?.totalActiveSeconds !== null)
+                            ? timelineData.attendance.totalActiveSeconds
+                            : ((selectedEmployee as any).totalActiveSeconds !== undefined)
+                            ? (selectedEmployee as any).totalActiveSeconds
+                            : Math.round((selectedEmployee.activeHoursToday || 0) * 3600)) / 3600
+                        )}
                       </span>
                     </div>
 
                     <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 text-xs">
                       <span className="text-[10px] font-bold text-slate-400 uppercase block">Break / Idle</span>
                       <span className="text-sm font-black text-amber-700">
-                        {formatHoursToTime((timelineData?.attendance?.totalIdleSeconds || 0) / 3600)}
+                        {formatHoursToTime(
+                          ((timelineData?.attendance?.totalIdleSeconds !== undefined && timelineData?.attendance?.totalIdleSeconds !== null)
+                            ? timelineData.attendance.totalIdleSeconds
+                            : ((selectedEmployee as any).totalIdleSeconds !== undefined)
+                            ? (selectedEmployee as any).totalIdleSeconds
+                            : Math.round((selectedEmployee.idleHoursToday || 0) * 3600)) / 3600
+                        )}
                       </span>
                     </div>
 

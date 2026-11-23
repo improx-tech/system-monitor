@@ -53,6 +53,35 @@ export async function uploadActivityBatch(req: AuthenticatedRequest, res: Respon
     };
 
     if (!activities || !Array.isArray(activities) || activities.length === 0) {
+      if (isPaused || currentStatus) {
+        const now = new Date();
+        const userStatus = isPaused ? 'PAUSED' : (currentStatus || 'ONLINE');
+        await prisma.user.update({
+          where: { id: userId },
+          data: {
+            status: userStatus,
+            pauseReason: isPaused ? (pauseReason || 'Break') : null,
+            pauseComment: isPaused ? (pauseComment || null) : null,
+            lastActiveAt: now
+          }
+        });
+        socketService.broadcastLiveActivity(userId, {
+          status: userStatus,
+          pauseReason: isPaused ? (pauseReason || 'Break') : null,
+          pauseComment: isPaused ? (pauseComment || null) : null,
+          lastActiveAt: now
+        });
+        const todayStr = getCompanyTodayString(now);
+        const latestAtt = await prisma.attendance.findUnique({
+          where: { userId_date: { userId, date: todayStr } }
+        });
+        return res.status(200).json({
+          success: true,
+          message: 'Status updated',
+          totalActiveSeconds: latestAtt?.totalActiveSeconds || 0,
+          totalIdleSeconds: latestAtt?.totalIdleSeconds || 0
+        });
+      }
       return res.status(400).json({ success: false, message: 'Invalid or empty activity batch' });
     }
 
