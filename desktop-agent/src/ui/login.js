@@ -97,6 +97,7 @@ let currentCategory = 'WORK';
 let currentTaskName = 'General Work';
 let isRunning = false;
 let isPaused = false;
+let isSystemIdle = false;
 let sessionSeconds = 0;
 let timerInterval = null;
 
@@ -1002,7 +1003,7 @@ function formatHoursMins(sec) {
 function startDigitalTimer() {
   if (timerInterval) clearInterval(timerInterval);
   timerInterval = setInterval(() => {
-    if (isRunning && !isPaused) {
+    if (isRunning && !isPaused && !isSystemIdle) {
       sessionSeconds++;
       if (todayTimer) todayTimer.textContent = formatTimerDisplay(sessionSeconds);
       if (displayTaskDuration) displayTaskDuration.textContent = formatHoursMins(sessionSeconds);
@@ -1298,6 +1299,7 @@ setInterval(loadFrontBreakdown, 30000);
 if (ipcRenderer) {
   ipcRenderer.on('agent-state-changed', (event, state) => {
     if (state.user) {
+      isSystemIdle = !!state.isIdle;
       showDashboardView(state);
 
       if (todayActiveTime && state.activeHoursFormatted) {
@@ -1306,12 +1308,10 @@ if (ipcRenderer) {
       if (todayBreakTime && state.idleHoursFormatted) {
         todayBreakTime.textContent = state.idleHoursFormatted;
       }
-      if (typeof state.totalActiveSeconds === 'number' && state.totalActiveSeconds > 0) {
-        if (sessionSeconds === 0 || Math.abs(sessionSeconds - state.totalActiveSeconds) > 30) {
-          sessionSeconds = state.totalActiveSeconds;
-          if (todayTimer) todayTimer.textContent = formatTimerDisplay(sessionSeconds);
-          if (displayTaskDuration) displayTaskDuration.textContent = formatHoursMins(sessionSeconds);
-        }
+      if (typeof state.totalActiveSeconds === 'number') {
+        sessionSeconds = state.totalActiveSeconds;
+        if (todayTimer) todayTimer.textContent = formatTimerDisplay(sessionSeconds);
+        if (displayTaskDuration) displayTaskDuration.textContent = formatHoursMins(sessionSeconds);
       }
       const kpiWork = document.getElementById('kpiTodayWork');
       const kpiBreak = document.getElementById('kpiTodayBreak');
@@ -1320,6 +1320,15 @@ if (ipcRenderer) {
 
       if (liveActiveAppText && state.currentApp) {
         liveActiveAppText.textContent = state.currentApp;
+      }
+
+      // If tracking is active but system is idle / screen off / black screen
+      if (state.isTracking && !state.isPaused && isSystemIdle) {
+        if (liveStatusPill) {
+          liveStatusPill.className = 'status-indicator-pill standby';
+          if (liveStatusText) liveStatusText.textContent = 'AWAY / IDLE';
+        }
+        if (headerStatusDot) headerStatusDot.style.background = '#f59e0b';
       }
     }
   });

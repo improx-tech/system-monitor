@@ -62,3 +62,59 @@ export function formatToCompanyTime(d: Date): string {
     return `${h}:${m}${ampm}`;
   }
 }
+
+/**
+ * Mathematically validates and bounds attendance records against physical wall-clock time.
+ * Invariant: totalActiveSeconds + totalIdleSeconds + manualPauseSeconds <= maxAllowedShiftSeconds
+ * where maxAllowedShiftSeconds = Math.max(0, Math.floor(((clockOutAt || asOf) - clockInAt) / 1000)).
+ *
+ * This mathematically guarantees that no matter what delays, retries, sleeps or intervals occur,
+ * tracked time CANNOT exceed the physical time elapsed since clock in.
+ */
+export function sanitizeAttendanceTimes(att: {
+  clockInAt: Date | string;
+  clockOutAt?: Date | string | null;
+  totalActiveSeconds?: number | null;
+  totalIdleSeconds?: number | null;
+  manualPauseSeconds?: number | null;
+  totalWorkSeconds?: number | null;
+}, asOf: Date = new Date()) {
+  const clockInMs = new Date(att.clockInAt).getTime();
+  const endMs = att.clockOutAt ? new Date(att.clockOutAt).getTime() : asOf.getTime();
+  const maxAllowedSeconds = Math.max(0, Math.floor((endMs - clockInMs) / 1000));
+
+  let active = Math.max(0, Math.round(att.totalActiveSeconds || 0));
+  let idle = Math.max(0, Math.round(att.totalIdleSeconds || 0));
+  let pause = Math.max(0, Math.round(att.manualPauseSeconds || 0));
+
+  const combinedBreaks = idle + pause;
+  const totalRaw = active + combinedBreaks;
+
+  if (totalRaw > maxAllowedSeconds) {
+    if (combinedBreaks >= maxAllowedSeconds) {
+      active = 0;
+      if (combinedBreaks > 0) {
+        idle = Math.round((idle / combinedBreaks) * maxAllowedSeconds);
+        pause = maxAllowedSeconds - idle;
+      } else {
+        idle = 0;
+        pause = maxAllowedSeconds;
+      }
+    } else {
+      active = maxAllowedSeconds - combinedBreaks;
+    }
+  }
+
+  const finalBreaks = idle + pause;
+  const finalTotalWork = active + finalBreaks;
+
+  return {
+    totalActiveSeconds: active,
+    totalIdleSeconds: idle,
+    manualPauseSeconds: pause,
+    combinedBreakSeconds: finalBreaks,
+    totalWorkSeconds: finalTotalWork,
+    maxAllowedSeconds
+  };
+}
+
