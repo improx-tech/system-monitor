@@ -190,7 +190,10 @@ export const Employees: React.FC = () => {
             <div className="space-y-2 max-h-[75vh] overflow-y-auto pr-1">
               {filtered.map((emp) => {
                 const isSelected = emp.id === selectedUserId;
-                const statusDot = emp.status === 'ONLINE' || (emp.status as string) === 'WORKING'
+                const isEmpClockedOut = !!(emp.clockOutAt || (emp as any).attendances?.[0]?.clockOutAt);
+                const statusDot = isEmpClockedOut
+                  ? 'bg-slate-300'
+                  : emp.status === 'ONLINE' || (emp.status as string) === 'WORKING'
                   ? 'bg-emerald-500'
                   : emp.status === 'PAUSED' || emp.status === 'IDLE'
                   ? 'bg-amber-400'
@@ -276,13 +279,17 @@ export const Employees: React.FC = () => {
 
                     <div className="flex items-center gap-2">
                       <span className={`px-3 py-1 rounded-xl text-xs font-extrabold ${
-                        selectedEmployee.status === 'ONLINE' || (selectedEmployee.status as string) === 'WORKING'
+                        (selectedEmployee.clockOutAt || (selectedEmployee as any).attendances?.[0]?.clockOutAt)
+                          ? 'bg-slate-100 text-slate-600'
+                          : selectedEmployee.status === 'ONLINE' || (selectedEmployee.status as string) === 'WORKING'
                           ? 'bg-emerald-100 text-emerald-800'
                           : selectedEmployee.status === 'PAUSED' || selectedEmployee.status === 'IDLE'
                           ? 'bg-amber-100 text-amber-800'
                           : 'bg-slate-100 text-slate-600'
                       }`}>
-                        {selectedEmployee.status === 'ONLINE' || (selectedEmployee.status as string) === 'WORKING'
+                        {(selectedEmployee.clockOutAt || (selectedEmployee as any).attendances?.[0]?.clockOutAt)
+                          ? '⚪ Shift Completed'
+                          : selectedEmployee.status === 'ONLINE' || (selectedEmployee.status as string) === 'WORKING'
                           ? '🟢 Active Working'
                           : selectedEmployee.status === 'PAUSED' || selectedEmployee.status === 'IDLE'
                           ? '🟡 On Break'

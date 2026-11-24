@@ -325,6 +325,15 @@ export async function clockOutHandler(req: AuthenticatedRequest, res: Response) 
       });
     }
 
+    // Broadcast OFFLINE immediately to all connected Admin dashboards
+    socketService.broadcastUserPresence(userId, 'OFFLINE');
+    socketService.broadcastLiveActivity(userId, {
+      status: 'OFFLINE',
+      pauseReason: null,
+      pauseComment: null,
+      lastActiveAt: now
+    });
+
     return res.status(200).json({ success: true, message: 'Clocked out successfully' });
   } catch (error: any) {
     console.error('Clock out error:', error);

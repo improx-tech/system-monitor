@@ -172,17 +172,20 @@ export async function getEmployees(req: Request, res: Response) {
         totalWorkSec = sanitized.totalWorkSeconds;
       }
 
+      const isClockedOut = !!att?.clockOutAt;
+      const effectiveStatus = isClockedOut ? 'OFFLINE' : emp.status;
+
       return {
         id: emp.id,
         name: emp.name,
         email: emp.email,
         department: emp.department,
         shift: emp.shift,
-        status: emp.status,
+        status: effectiveStatus,
         lastActiveAt: emp.lastActiveAt,
-        currentApp: emp.currentApp,
-        currentTitle: emp.currentTitle,
-        currentDomain: emp.currentDomain,
+        currentApp: isClockedOut ? null : emp.currentApp,
+        currentTitle: isClockedOut ? null : emp.currentTitle,
+        currentDomain: isClockedOut ? null : emp.currentDomain,
         clockInAt: att?.clockInAt || null,
         clockOutAt: att?.clockOutAt || null,
         totalActiveSeconds: activeSec,
@@ -460,23 +463,24 @@ export async function getRealtimeGrid(req: Request, res: Response) {
       const att = emp.attendances[0];
       const latestScreen = emp.screenshots[0];
       const sanitized = att ? sanitizeAttendanceTimes(att, now) : { totalActiveSeconds: 0, combinedBreakSeconds: 0 };
+      const isClockedOut = !!att?.clockOutAt;
       return {
         id: emp.id,
         name: emp.name,
         email: emp.email,
         department: emp.department,
-        status: emp.status,
-        pauseReason: emp.pauseReason,
-        pauseComment: emp.pauseComment,
-        currentTask: emp.currentTask || emp.currentApp || 'Active Work',
+        status: isClockedOut ? 'OFFLINE' : emp.status,
+        pauseReason: isClockedOut ? null : emp.pauseReason,
+        pauseComment: isClockedOut ? null : emp.pauseComment,
+        currentTask: isClockedOut ? null : (emp.currentTask || emp.currentApp || 'Active Work'),
         lastActiveAt: emp.lastActiveAt,
-        currentApp: emp.currentApp || 'None',
-        currentTitle: emp.currentTitle || '',
-        currentDomain: emp.currentDomain || '',
+        currentApp: isClockedOut ? null : (emp.currentApp || 'None'),
+        currentTitle: isClockedOut ? null : (emp.currentTitle || ''),
+        currentDomain: isClockedOut ? null : (emp.currentDomain || ''),
         clockInAt: att?.clockInAt || null,
         activeHoursToday: parseFloat((sanitized.totalActiveSeconds / 3600).toFixed(2)),
         idleHoursToday: parseFloat((sanitized.combinedBreakSeconds / 3600).toFixed(2)),
-        latestScreenshot: latestScreen || null
+        latestScreenshot: isClockedOut ? null : (latestScreen || null)
       };
     });
 
