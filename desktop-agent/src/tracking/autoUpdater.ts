@@ -47,11 +47,11 @@ export class AutoUpdateManager {
 
       const rawText = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
       const versionMatch = rawText.match(/version:\s*([0-9]+\.[0-9]+\.[0-9]+)/i);
-      const exeMatch = rawText.match(/path:\s*([^\s]+)/i);
+      const exeMatch = rawText.match(/path:\s*([^\r\n]+)/i);
 
       if (!versionMatch) return false;
       const remoteVersion = versionMatch[1];
-      const remoteExeName = exeMatch ? exeMatch[1] : `Improx-Agent-Setup-${remoteVersion}.exe`;
+      const remoteExeName = exeMatch ? exeMatch[1].trim() : `Improx Monitoring System Setup ${remoteVersion}.exe`;
 
       if (this.isHigherVersion(remoteVersion, this.currentVersion)) {
         console.log(`🚀 New Desktop Agent update found: v${remoteVersion} (current: v${this.currentVersion})`);
@@ -80,7 +80,7 @@ export class AutoUpdateManager {
 
   private async downloadUpdateSilently(version: string, exeName: string) {
     try {
-      const downloadUrl = `${this.serverUrl}/updates/${exeName}`;
+      const downloadUrl = `${this.serverUrl}/updates/${encodeURIComponent(exeName)}`;
       const userDataDir = app ? app.getPath('userData') : '.';
       const tempPath = path.join(userDataDir, `Improx-Update-${version}.exe`);
 
