@@ -4,7 +4,7 @@ import { prisma } from '../config/prisma';
 import { resolveAppInfo } from '../config/appCategories';
 import { socketService } from '../services/socketService';
 import { config } from '../config/environment';
-import { getCompanyTodayString } from '../utils/timeZone';
+import { getCompanyTodayString, sanitizeAttendanceTimes } from '../utils/timeZone';
 import path from 'path';
 
 export interface ActivityBatchItem {
@@ -75,12 +75,12 @@ export async function uploadActivityBatch(req: AuthenticatedRequest, res: Respon
         const latestAtt = await prisma.attendance.findUnique({
           where: { userId_date: { userId, date: todayStr } }
         });
-        const combinedBreaks = (latestAtt?.totalIdleSeconds || 0) + ((latestAtt as any)?.manualPauseSeconds || 0);
+        const sanitized = latestAtt ? sanitizeAttendanceTimes(latestAtt, now) : { totalActiveSeconds: 0, combinedBreakSeconds: 0 };
         return res.status(200).json({
           success: true,
           message: 'Status updated',
-          totalActiveSeconds: latestAtt?.totalActiveSeconds || 0,
-          totalIdleSeconds: combinedBreaks
+          totalActiveSeconds: sanitized.totalActiveSeconds,
+          totalIdleSeconds: sanitized.combinedBreakSeconds
         });
       }
       return res.status(400).json({ success: false, message: 'Invalid or empty activity batch' });
@@ -100,15 +100,26 @@ export async function uploadActivityBatch(req: AuthenticatedRequest, res: Respon
                               (item.keystrokes === 0 || item.keystrokes === undefined);
       const isLockOrDesktop = !item.appName ||
                               item.appName === 'Desktop' ||
+                              item.appName === 'Lock Screen' ||
                               item.appName === 'explorer.exe' ||
                               item.appName === 'Unknown Application' ||
                               item.processName?.toLowerCase() === 'lockapp.exe' ||
                               item.processName?.toLowerCase() === 'logonui.exe' ||
                               item.processName?.toLowerCase() === 'explorer.exe';
 
+      const lowerTask = (item.taskName || taskName || '').toLowerCase();
+      const isMeetingOrCall = item.category === 'COMMUNICATION' ||
+                              lowerTask.includes('meeting') ||
+                              lowerTask.includes('call') ||
+                              lowerTask.includes('discussion') ||
+                              lowerTask.includes('client');
+
+      // Zero keyboard/mouse input during sample (unless on active meeting/call),
+      // lock screen, black screen, or explicit idle status is always counted as away/break.
       const isEffectiveIdle = !!item.isIdle || 
                               currentStatus === 'IDLE' || 
-                              (isZeroInput && isItemZeroInput && isLockOrDesktop);
+                              isLockOrDesktop ||
+                              (!isMeetingOrCall && isZeroInput && isItemZeroInput);
 
       const activeTask = isEffectiveIdle ? 'Away / Idle Break' : (item.taskName || taskName || (isPaused ? (pauseReason || 'Break') : 'Active Task'));
       const { friendlyName, category } = resolveAppInfo(
@@ -159,37 +170,56 @@ export async function uploadActivityBatch(req: AuthenticatedRequest, res: Respon
       data: createRecords
     });
 
-    // Update Attendance per date accurately
+    // Update Attendance per date accurately and clamp against physical wall-clock elapsed time
     for (const [dateKey, stats] of Object.entries(dateGroups)) {
-      const totalSec = stats.active + stats.idle + stats.pause;
       let existingAtt = await prisma.attendance.findUnique({
         where: { userId_date: { userId, date: dateKey } }
       });
 
       if (!existingAtt) {
+        const sanitized = sanitizeAttendanceTimes({
+          clockInAt: stats.minTime,
+          clockOutAt: isCatchUp ? now : null,
+          totalActiveSeconds: stats.active,
+          totalIdleSeconds: stats.idle,
+          manualPauseSeconds: stats.pause
+        }, now);
+
         await prisma.attendance.create({
           data: {
             userId,
             date: dateKey,
             clockInAt: stats.minTime,
             clockOutAt: isCatchUp ? now : null,
-            totalActiveSeconds: stats.active,
-            totalIdleSeconds: stats.idle,
-            manualPauseSeconds: stats.pause,
-            totalWorkSeconds: totalSec,
+            totalActiveSeconds: sanitized.totalActiveSeconds,
+            totalIdleSeconds: sanitized.totalIdleSeconds,
+            manualPauseSeconds: sanitized.manualPauseSeconds,
+            totalWorkSeconds: sanitized.totalWorkSeconds,
             status: 'PRESENT',
             pauseReason: isPaused ? (pauseReason || 'Break') : null
           }
         });
       } else {
+        const rawActive = (existingAtt.totalActiveSeconds || 0) + stats.active;
+        const rawIdle = (existingAtt.totalIdleSeconds || 0) + stats.idle;
+        const rawPause = ((existingAtt as any).manualPauseSeconds || 0) + stats.pause;
+
+        const sanitized = sanitizeAttendanceTimes({
+          clockInAt: existingAtt.clockInAt,
+          clockOutAt: existingAtt.clockOutAt,
+          totalActiveSeconds: rawActive,
+          totalIdleSeconds: rawIdle,
+          manualPauseSeconds: rawPause
+        }, now);
+
         await prisma.attendance.update({
           where: { id: existingAtt.id },
           data: {
             ...(isCatchUp ? {} : { clockOutAt: null }),
-            totalActiveSeconds: { increment: stats.active },
-            totalIdleSeconds: { increment: stats.idle },
-            manualPauseSeconds: { increment: stats.pause },
-            totalWorkSeconds: { increment: totalSec },
+            totalActiveSeconds: sanitized.totalActiveSeconds,
+            totalIdleSeconds: sanitized.totalIdleSeconds,
+            manualPauseSeconds: sanitized.manualPauseSeconds,
+            totalWorkSeconds: sanitized.totalWorkSeconds,
             ...(isCatchUp ? {} : { pauseReason: isPaused ? (pauseReason || 'Break') : null })
           }
         });
@@ -241,18 +271,20 @@ export async function uploadActivityBatch(req: AuthenticatedRequest, res: Respon
       });
     }
 
-    // Fetch latest attendance for today's stats response to agent
+    // Fetch latest attendance for today's stats response to agent (fully clamped)
     const todayAtt = await prisma.attendance.findUnique({
       where: { userId_date: { userId, date: todayCompany } }
     });
 
-    const totalBreaks = (todayAtt?.totalIdleSeconds || 0) + ((todayAtt as any)?.manualPauseSeconds || 0);
+    const sanitizedAtt = todayAtt
+      ? sanitizeAttendanceTimes(todayAtt, now)
+      : { totalActiveSeconds: 0, combinedBreakSeconds: 0 };
 
     return res.status(200).json({
       success: true,
       message: 'Processed ' + activities.length + ' activity entries',
-      totalActiveSeconds: todayAtt?.totalActiveSeconds || 0,
-      totalIdleSeconds: totalBreaks
+      totalActiveSeconds: sanitizedAtt.totalActiveSeconds,
+      totalIdleSeconds: sanitizedAtt.combinedBreakSeconds
     });
   } catch (error: any) {
     console.error('Activity upload error:', error);

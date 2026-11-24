@@ -3,7 +3,7 @@ import { AuthenticatedRequest } from '../middleware/auth';
 import { prisma } from '../config/prisma';
 import { buildTimelineIntervals } from './adminController';
 import { extractYouTubeVideoTitle } from '../config/appCategories';
-import { getCompanyTodayString, getDayBounds } from '../utils/timeZone';
+import { getCompanyTodayString, getDayBounds, sanitizeAttendanceTimes } from '../utils/timeZone';
 
 export async function getMyProfile(req: AuthenticatedRequest, res: Response) {
   try {
@@ -141,15 +141,25 @@ export async function getMyTimeline(req: AuthenticatedRequest, res: Response) {
 
     const intervals = buildTimelineIntervals(logs, screenshots, offlineTimes);
 
+    const now = new Date();
+    const sanitizedAtt = attendance ? sanitizeAttendanceTimes(attendance, now) : null;
+
     return res.status(200).json({
       success: true,
       user,
       date: dateStr,
-      attendance: attendance || {
+      attendance: sanitizedAtt ? {
+        ...attendance,
+        totalActiveSeconds: sanitizedAtt.totalActiveSeconds,
+        totalIdleSeconds: sanitizedAtt.combinedBreakSeconds,
+        manualPauseSeconds: sanitizedAtt.manualPauseSeconds,
+        totalWorkSeconds: sanitizedAtt.totalWorkSeconds
+      } : {
         clockInAt: null,
         clockOutAt: null,
         totalActiveSeconds: 0,
         totalIdleSeconds: 0,
+        manualPauseSeconds: 0,
         totalWorkSeconds: 0
       },
       activityBlocks: logs,
@@ -186,10 +196,11 @@ export async function getMyTimesheet(req: AuthenticatedRequest, res: Response) {
       });
     }
 
-    const totalBreaks = (attendance.totalIdleSeconds || 0) + ((attendance as any).manualPauseSeconds || 0);
-    const activeHours = parseFloat((attendance.totalActiveSeconds / 3600).toFixed(2));
-    const idleHours = parseFloat((totalBreaks / 3600).toFixed(2));
-    const totalHours = parseFloat((attendance.totalWorkSeconds / 3600).toFixed(2));
+    const now = new Date();
+    const sanitized = sanitizeAttendanceTimes(attendance, now);
+    const activeHours = parseFloat((sanitized.totalActiveSeconds / 3600).toFixed(2));
+    const idleHours = parseFloat((sanitized.combinedBreakSeconds / 3600).toFixed(2));
+    const totalHours = parseFloat((sanitized.totalWorkSeconds / 3600).toFixed(2));
     const productivityScore = totalHours > 0 ? Math.min(100, Math.round((activeHours / totalHours) * 100)) : 0;
 
     return res.status(200).json({
@@ -197,6 +208,10 @@ export async function getMyTimesheet(req: AuthenticatedRequest, res: Response) {
       timesheet: {
         clockInAt: attendance.clockInAt,
         clockOutAt: attendance.clockOutAt,
+        totalActiveSeconds: sanitized.totalActiveSeconds,
+        totalIdleSeconds: sanitized.combinedBreakSeconds,
+        manualPauseSeconds: sanitized.manualPauseSeconds,
+        totalWorkSeconds: sanitized.totalWorkSeconds,
         activeHours,
         idleHours,
         totalHours,

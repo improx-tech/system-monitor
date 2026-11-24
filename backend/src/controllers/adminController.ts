@@ -7,7 +7,7 @@ import { exec } from 'child_process';
 import { prisma } from '../config/prisma';
 import { config } from '../config/environment';
 import { extractYouTubeVideoTitle } from '../config/appCategories';
-import { getCompanyTodayString, getDayBounds } from '../utils/timeZone';
+import { getCompanyTodayString, getDayBounds, sanitizeAttendanceTimes } from '../utils/timeZone';
 
 // Dashboard Overview Statistics
 export async function getDashboardStats(req: Request, res: Response) {
@@ -26,13 +26,16 @@ export async function getDashboardStats(req: Request, res: Response) {
     const idleCount = employees.filter(e => e.status === 'IDLE').length;
     const offlineCount = employees.filter(e => e.status === 'OFFLINE').length;
 
-    // Aggregate work hours for selected date
+    // Aggregate work hours for selected date (mathematically bounded by real elapsed time)
     const dateAttendances = await prisma.attendance.findMany({
       where: { date: requestedDate }
     });
 
-    const totalActiveSecondsToday = dateAttendances.reduce((sum, a) => sum + a.totalActiveSeconds, 0);
-    const totalIdleSecondsToday = dateAttendances.reduce((sum, a) => sum + (a.totalIdleSeconds || 0) + ((a as any).manualPauseSeconds || 0), 0);
+    const now = new Date();
+    const sanitizedAttendances = dateAttendances.map(a => sanitizeAttendanceTimes(a, now));
+
+    const totalActiveSecondsToday = sanitizedAttendances.reduce((sum, a) => sum + a.totalActiveSeconds, 0);
+    const totalIdleSecondsToday = sanitizedAttendances.reduce((sum, a) => sum + a.combinedBreakSeconds, 0);
     const totalWorkSecondsToday = totalActiveSecondsToday + totalIdleSecondsToday;
 
     // Top Apps for selected date
@@ -82,8 +85,9 @@ export async function getDashboardStats(req: Request, res: Response) {
         where: { date: dateStr }
       });
 
-      const dayActiveSec = dayRecords.reduce((sum, r) => sum + r.totalActiveSeconds, 0);
-      const dayIdleSec = dayRecords.reduce((sum, r) => sum + (r.totalIdleSeconds || 0) + ((r as any).manualPauseSeconds || 0), 0);
+      const sanitizedDay = dayRecords.map(r => sanitizeAttendanceTimes(r, d));
+      const dayActiveSec = sanitizedDay.reduce((sum, r) => sum + r.totalActiveSeconds, 0);
+      const dayIdleSec = sanitizedDay.reduce((sum, r) => sum + r.combinedBreakSeconds, 0);
 
       past7Days.push({
         date: dateStr,
@@ -150,9 +154,24 @@ export async function getEmployees(req: Request, res: Response) {
       orderBy: [{ status: 'asc' }, { name: 'asc' }]
     });
 
+    const now = new Date();
     const formatted = employees.map(emp => {
       const att = emp.attendances[0];
-      const combinedBreakIdle = (att?.totalIdleSeconds || 0) + ((att as any)?.manualPauseSeconds || 0);
+      let activeSec = 0;
+      let idleSec = 0;
+      let pauseSec = 0;
+      let combinedBreakIdle = 0;
+      let totalWorkSec = 0;
+
+      if (att) {
+        const sanitized = sanitizeAttendanceTimes(att, now);
+        activeSec = sanitized.totalActiveSeconds;
+        idleSec = sanitized.totalIdleSeconds;
+        pauseSec = sanitized.manualPauseSeconds;
+        combinedBreakIdle = sanitized.combinedBreakSeconds;
+        totalWorkSec = sanitized.totalWorkSeconds;
+      }
+
       return {
         id: emp.id,
         name: emp.name,
@@ -166,13 +185,13 @@ export async function getEmployees(req: Request, res: Response) {
         currentDomain: emp.currentDomain,
         clockInAt: att?.clockInAt || null,
         clockOutAt: att?.clockOutAt || null,
-        totalActiveSeconds: att?.totalActiveSeconds || 0,
+        totalActiveSeconds: activeSec,
         totalIdleSeconds: combinedBreakIdle,
-        manualPauseSeconds: (att as any)?.manualPauseSeconds || 0,
-        totalWorkSeconds: att?.totalWorkSeconds || 0,
-        activeHoursToday: att ? parseFloat((att.totalActiveSeconds / 3600).toFixed(2)) : 0,
-        idleHoursToday: att ? parseFloat((combinedBreakIdle / 3600).toFixed(2)) : 0,
-        totalHoursToday: att ? parseFloat((att.totalWorkSeconds / 3600).toFixed(2)) : 0,
+        manualPauseSeconds: pauseSec,
+        totalWorkSeconds: totalWorkSec,
+        activeHoursToday: parseFloat((activeSec / 3600).toFixed(2)),
+        idleHoursToday: parseFloat((combinedBreakIdle / 3600).toFixed(2)),
+        totalHoursToday: parseFloat((totalWorkSec / 3600).toFixed(2)),
         createdAt: emp.createdAt
       };
     });
@@ -413,8 +432,11 @@ export async function getRealtimeGrid(req: Request, res: Response) {
           where: { date: today },
           select: {
             clockInAt: true,
+            clockOutAt: true,
             totalActiveSeconds: true,
-            totalIdleSeconds: true
+            totalIdleSeconds: true,
+            manualPauseSeconds: true,
+            totalWorkSeconds: true
           }
         },
         screenshots: {
@@ -433,9 +455,11 @@ export async function getRealtimeGrid(req: Request, res: Response) {
       orderBy: [{ status: 'asc' }, { name: 'asc' }]
     });
 
+    const now = new Date();
     const grid = employees.map(emp => {
       const att = emp.attendances[0];
       const latestScreen = emp.screenshots[0];
+      const sanitized = att ? sanitizeAttendanceTimes(att, now) : { totalActiveSeconds: 0, combinedBreakSeconds: 0 };
       return {
         id: emp.id,
         name: emp.name,
@@ -450,8 +474,8 @@ export async function getRealtimeGrid(req: Request, res: Response) {
         currentTitle: emp.currentTitle || '',
         currentDomain: emp.currentDomain || '',
         clockInAt: att?.clockInAt || null,
-        activeHoursToday: att ? parseFloat((att.totalActiveSeconds / 3600).toFixed(2)) : 0,
-        idleHoursToday: att ? parseFloat((att.totalIdleSeconds / 3600).toFixed(2)) : 0,
+        activeHoursToday: parseFloat((sanitized.totalActiveSeconds / 3600).toFixed(2)),
+        idleHoursToday: parseFloat((sanitized.combinedBreakSeconds / 3600).toFixed(2)),
         latestScreenshot: latestScreen || null
       };
     });
@@ -779,16 +803,19 @@ export async function getActivityTimeline(req: Request, res: Response) {
 
     const intervals = buildTimelineIntervals(logs, screenshots, offlineTimes);
 
-    const combinedIdleSeconds = (attendance?.totalIdleSeconds || 0) + ((attendance as any)?.manualPauseSeconds || 0);
+    const now = new Date();
+    const sanitizedAtt = attendance ? sanitizeAttendanceTimes(attendance, now) : null;
 
     return res.status(200).json({
       success: true,
       user,
       date: queryDate,
-      attendance: attendance ? {
+      attendance: sanitizedAtt ? {
         ...attendance,
-        totalIdleSeconds: combinedIdleSeconds,
-        manualPauseSeconds: (attendance as any).manualPauseSeconds || 0
+        totalActiveSeconds: sanitizedAtt.totalActiveSeconds,
+        totalIdleSeconds: sanitizedAtt.combinedBreakSeconds,
+        manualPauseSeconds: sanitizedAtt.manualPauseSeconds,
+        totalWorkSeconds: sanitizedAtt.totalWorkSeconds
       } : {
         clockInAt: null,
         clockOutAt: null,
@@ -926,11 +953,12 @@ export async function getTimesheets(req: Request, res: Response) {
       orderBy: [{ date: 'desc' }, { user: { name: 'asc' } }]
     });
 
+    const now = new Date();
     const formatted = attendances.map(a => {
-      const totalBreaks = (a.totalIdleSeconds || 0) + ((a as any).manualPauseSeconds || 0);
-      const activeHours = parseFloat((a.totalActiveSeconds / 3600).toFixed(2));
-      const idleHours = parseFloat((totalBreaks / 3600).toFixed(2));
-      const totalHours = parseFloat((a.totalWorkSeconds / 3600).toFixed(2));
+      const sanitized = sanitizeAttendanceTimes(a, now);
+      const activeHours = parseFloat((sanitized.totalActiveSeconds / 3600).toFixed(2));
+      const idleHours = parseFloat((sanitized.combinedBreakSeconds / 3600).toFixed(2));
+      const totalHours = parseFloat((sanitized.totalWorkSeconds / 3600).toFixed(2));
       const productivityScore = totalHours > 0 ? Math.min(100, Math.round((activeHours / totalHours) * 100)) : 0;
 
       return {
@@ -942,6 +970,10 @@ export async function getTimesheets(req: Request, res: Response) {
         date: a.date,
         clockInAt: a.clockInAt,
         clockOutAt: a.clockOutAt,
+        totalActiveSeconds: sanitized.totalActiveSeconds,
+        totalIdleSeconds: sanitized.combinedBreakSeconds,
+        manualPauseSeconds: sanitized.manualPauseSeconds,
+        totalWorkSeconds: sanitized.totalWorkSeconds,
         activeHours,
         idleHours,
         totalHours,

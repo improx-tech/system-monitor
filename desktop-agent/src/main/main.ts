@@ -409,9 +409,6 @@ class AgentApplication {
     if (durationSeconds <= 0) return;
     console.log(`☕ Recording ${durationSeconds}s break for: ${reason}`);
 
-    this.totalIdleSeconds += durationSeconds;
-    this.notifyUIState();
-
     const breakItem = {
       appName: 'Break',
       processName: 'System Sleep / Lock',
@@ -482,6 +479,7 @@ class AgentApplication {
       this.mainWindow.webContents.send('agent-state-changed', {
         isTracking: this.isTracking,
         isPaused: this.isPaused,
+        isIdle: !!this.lastSample?.isIdle,
         currentTask: this.currentTask,
         taskCategory: this.taskCategory,
         pauseReason: this.pauseReason,
@@ -676,6 +674,8 @@ class AgentApplication {
           const gapStartTime = new Date(now - elapsedSinceLastTick);
           console.log(`⏳ Detected ${sleepGapSeconds}s gap between ticks (laptop was asleep). Crediting as break.`);
           await this.recordBreakTime(sleepGapSeconds, 'Laptop Sleep / Inactive Break', gapStartTime);
+          this.lastTickTimestamp = Date.now();
+          return;
         }
       }
 

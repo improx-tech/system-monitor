@@ -1,5 +1,6 @@
 import { prisma } from '../config/prisma';
 import { socketService } from './socketService';
+import { sanitizeAttendanceTimes } from '../utils/timeZone';
 
 export function startHeartbeatSupervisor() {
   setInterval(async () => {
@@ -37,7 +38,7 @@ export function startHeartbeatSupervisor() {
         console.log(`🟡 [Heartbeat] Employee laptop asleep/inactive -> marked PAUSED on Break: ${user.name}`);
       }
 
-      // 2. Accumulate break/idle time for all users currently on PAUSED break with an open shift
+      // 2. Broadcast live status for paused users with open shift & auto-clockout if inactive > 4 hours
       const pausedUsersWithOpenShift = await prisma.user.findMany({
         where: {
           isActive: true,
@@ -55,7 +56,7 @@ export function startHeartbeatSupervisor() {
       for (const user of pausedUsersWithOpenShift) {
         const openAtt = user.attendances[0];
         if (openAtt) {
-          // If inactive for more than 4 hours, clock out
+          // If inactive for more than 4 hours, clock out cleanly at lastActiveAt
           if (user.lastActiveAt && user.lastActiveAt < maxInactivityThreshold) {
             await prisma.user.update({
               where: { id: user.id },
@@ -71,20 +72,23 @@ export function startHeartbeatSupervisor() {
             });
             console.log(`⏰ [Heartbeat] Employee inactive > 4 hours -> Clocked out: ${user.name}`);
           } else {
-            // While laptop is on sleep / break, add 15s break time every 15s tick
-            await prisma.attendance.update({
-              where: { id: openAtt.id },
-              data: {
-                totalIdleSeconds: { increment: 15 },
-                totalWorkSeconds: { increment: 15 },
-                pauseReason: user.pauseReason || 'Laptop Sleep Break'
-              }
-            });
+            // Live broadcast for WebSocket UI without corrupting/double-incrementing DB records
+            const sleepGapSec = user.lastActiveAt && (now.getTime() - user.lastActiveAt.getTime() > 40000)
+              ? Math.floor((now.getTime() - user.lastActiveAt.getTime()) / 1000)
+              : 0;
+
+            const sanitized = sanitizeAttendanceTimes({
+              clockInAt: openAtt.clockInAt,
+              clockOutAt: openAtt.clockOutAt,
+              totalActiveSeconds: openAtt.totalActiveSeconds,
+              totalIdleSeconds: openAtt.totalIdleSeconds,
+              manualPauseSeconds: (openAtt.manualPauseSeconds || 0) + sleepGapSec
+            }, now);
 
             socketService.broadcastLiveActivity(user.id, {
               status: 'PAUSED',
               pauseReason: user.pauseReason || 'Laptop Sleep Break',
-              totalIdleSeconds: (openAtt.totalIdleSeconds || 0) + (openAtt.manualPauseSeconds || 0) + 15,
+              totalIdleSeconds: sanitized.combinedBreakSeconds,
               lastActiveAt: user.lastActiveAt || now
             });
           }
@@ -95,3 +99,4 @@ export function startHeartbeatSupervisor() {
     }
   }, 15000);
 }
+
