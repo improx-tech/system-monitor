@@ -113,10 +113,10 @@ export function extractDomainFromTitle(title: string): string | null {
 export class NativeTrackerSupervisor {
   private child: ChildProcess | null = null;
   private pendingResolves: Array<(sample: TrackerSample) => void> = [];
-  private idleThresholdSeconds = 60;
+  private idleThresholdSeconds = 120;
   private inputTracker: InputTracker;
 
-  constructor(idleThresholdMinutes = 1) {
+  constructor(idleThresholdMinutes = 2) {
     this.idleThresholdSeconds = idleThresholdMinutes * 60;
     this.inputTracker = new InputTracker(idleThresholdMinutes);
     this.spawnTrackerProcess();
@@ -217,7 +217,9 @@ export class NativeTrackerSupervisor {
     const isLockScreen = fg.processName.toLowerCase() === 'lockapp.exe' || 
                          fg.processName.toLowerCase() === 'logonui.exe' || 
                          fg.processName.toLowerCase().endsWith('.scr');
-    const isIdle = metrics.isIdle || idleSeconds >= this.idleThresholdSeconds || isLockScreen;
+    const hasInput = (metrics.clicks > 0 || metrics.keystrokes > 0);
+    // User is idle ONLY if there was ZERO input AND (lock screen OR idle threshold exceeded)
+    const isIdle = !hasInput && (isLockScreen || metrics.isIdle || idleSeconds >= this.idleThresholdSeconds);
 
     if (!this.child || !this.child.stdin) {
       let domain: string | null = null;
@@ -230,8 +232,8 @@ export class NativeTrackerSupervisor {
         processName: fg.processName,
         windowTitle: isLockScreen ? 'Screen Locked' : (isIdle ? 'Black Screen / Idle Break' : fg.windowTitle),
         domain,
-        clicks: isIdle ? 0 : metrics.clicks,
-        keys: isIdle ? 0 : metrics.keystrokes,
+        clicks: metrics.clicks,
+        keys: metrics.keystrokes,
         isIdle
       };
     }

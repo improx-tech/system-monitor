@@ -8,6 +8,7 @@ import { prisma } from '../config/prisma';
 import { config } from '../config/environment';
 import { extractYouTubeVideoTitle } from '../config/appCategories';
 import { getCompanyTodayString, getDayBounds, sanitizeAttendanceTimes } from '../utils/timeZone';
+import { socketService } from '../services/socketService';
 
 // Dashboard Overview Statistics
 export async function getDashboardStats(req: Request, res: Response) {
@@ -172,17 +173,20 @@ export async function getEmployees(req: Request, res: Response) {
         totalWorkSec = sanitized.totalWorkSeconds;
       }
 
+      const isClockedOut = !!att?.clockOutAt;
+      const effectiveStatus = isClockedOut ? 'OFFLINE' : emp.status;
+
       return {
         id: emp.id,
         name: emp.name,
         email: emp.email,
         department: emp.department,
         shift: emp.shift,
-        status: emp.status,
+        status: effectiveStatus,
         lastActiveAt: emp.lastActiveAt,
-        currentApp: emp.currentApp,
-        currentTitle: emp.currentTitle,
-        currentDomain: emp.currentDomain,
+        currentApp: isClockedOut ? null : emp.currentApp,
+        currentTitle: isClockedOut ? null : emp.currentTitle,
+        currentDomain: isClockedOut ? null : emp.currentDomain,
         clockInAt: att?.clockInAt || null,
         clockOutAt: att?.clockOutAt || null,
         totalActiveSeconds: activeSec,
@@ -409,6 +413,88 @@ export async function deleteEmployee(req: Request, res: Response) {
   }
 }
 
+// Reset single employee's time tracking data for a day back to 0 minutes
+export async function resetEmployeeDay(req: Request, res: Response) {
+  try {
+    const { id } = req.params;
+    const { date } = req.body || req.query;
+    const targetDate = (date as string) || getCompanyTodayString();
+
+    const user = await prisma.user.findUnique({ where: { id } });
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'Employee not found' });
+    }
+
+    // 1. Delete attendance record for the date
+    await prisma.attendance.deleteMany({
+      where: {
+        userId: id,
+        date: targetDate
+      }
+    });
+
+    // 2. Delete activity logs for the date
+    const { startOfDay, endOfDay } = getDayBounds(targetDate);
+    await prisma.activityLog.deleteMany({
+      where: {
+        userId: id,
+        recordedAt: { gte: startOfDay, lte: endOfDay }
+      }
+    });
+
+    // 3. Delete screenshots for the date
+    await prisma.screenshot.deleteMany({
+      where: {
+        userId: id,
+        takenAt: { gte: startOfDay, lte: endOfDay }
+      }
+    });
+
+    // 4. Delete offline time records
+    try {
+      await prisma.offlineTime.deleteMany({
+        where: {
+          userId: id,
+          date: targetDate
+        }
+      });
+    } catch (e) {}
+
+    // 5. Reset user status back to OFFLINE
+    await prisma.user.update({
+      where: { id },
+      data: {
+        status: 'OFFLINE',
+        pauseReason: null,
+        pauseComment: null,
+        currentTask: null,
+        currentApp: null,
+        currentTitle: null,
+        currentDomain: null
+      }
+    });
+
+    try {
+      socketService.broadcastLiveActivity(id, {
+        status: 'OFFLINE',
+        pauseReason: null,
+        pauseComment: null,
+        currentTask: null,
+        currentApp: null,
+        currentTitle: null,
+        currentDomain: null
+      });
+    } catch (e) {}
+
+    return res.status(200).json({
+      success: true,
+      message: `Successfully reset time tracking data for ${user.name} for ${targetDate}. Employee can now start fresh from 0 minutes!`
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+}
+
 // Real-Time Live Grid Data
 export async function getRealtimeGrid(req: Request, res: Response) {
   try {
@@ -460,23 +546,24 @@ export async function getRealtimeGrid(req: Request, res: Response) {
       const att = emp.attendances[0];
       const latestScreen = emp.screenshots[0];
       const sanitized = att ? sanitizeAttendanceTimes(att, now) : { totalActiveSeconds: 0, combinedBreakSeconds: 0 };
+      const isClockedOut = !!att?.clockOutAt;
       return {
         id: emp.id,
         name: emp.name,
         email: emp.email,
         department: emp.department,
-        status: emp.status,
-        pauseReason: emp.pauseReason,
-        pauseComment: emp.pauseComment,
-        currentTask: emp.currentTask || emp.currentApp || 'Active Work',
+        status: isClockedOut ? 'OFFLINE' : emp.status,
+        pauseReason: isClockedOut ? null : emp.pauseReason,
+        pauseComment: isClockedOut ? null : emp.pauseComment,
+        currentTask: isClockedOut ? null : (emp.currentTask || emp.currentApp || 'Active Work'),
         lastActiveAt: emp.lastActiveAt,
-        currentApp: emp.currentApp || 'None',
-        currentTitle: emp.currentTitle || '',
-        currentDomain: emp.currentDomain || '',
+        currentApp: isClockedOut ? null : (emp.currentApp || 'None'),
+        currentTitle: isClockedOut ? null : (emp.currentTitle || ''),
+        currentDomain: isClockedOut ? null : (emp.currentDomain || ''),
         clockInAt: att?.clockInAt || null,
         activeHoursToday: parseFloat((sanitized.totalActiveSeconds / 3600).toFixed(2)),
         idleHoursToday: parseFloat((sanitized.combinedBreakSeconds / 3600).toFixed(2)),
-        latestScreenshot: latestScreen || null
+        latestScreenshot: isClockedOut ? null : (latestScreen || null)
       };
     });
 
@@ -813,7 +900,7 @@ export async function getActivityTimeline(req: Request, res: Response) {
       attendance: sanitizedAtt ? {
         ...attendance,
         totalActiveSeconds: sanitizedAtt.totalActiveSeconds,
-        totalIdleSeconds: sanitizedAtt.combinedBreakSeconds,
+        totalIdleSeconds: sanitizedAtt.totalIdleSeconds,
         manualPauseSeconds: sanitizedAtt.manualPauseSeconds,
         totalWorkSeconds: sanitizedAtt.totalWorkSeconds
       } : {

@@ -87,21 +87,20 @@ export function sanitizeAttendanceTimes(att: {
   let idle = Math.max(0, Math.round(att.totalIdleSeconds || 0));
   let pause = Math.max(0, Math.round(att.manualPauseSeconds || 0));
 
-  const combinedBreaks = idle + pause;
-  const totalRaw = active + combinedBreaks;
+  // 1. Active work cannot exceed total physical elapsed time
+  active = Math.min(active, maxAllowedSeconds);
 
-  if (totalRaw > maxAllowedSeconds) {
-    if (combinedBreaks >= maxAllowedSeconds) {
-      active = 0;
-      if (combinedBreaks > 0) {
-        idle = Math.round((idle / combinedBreaks) * maxAllowedSeconds);
-        pause = maxAllowedSeconds - idle;
-      } else {
-        idle = 0;
-        pause = maxAllowedSeconds;
-      }
+  // 2. Maximum remaining time allowed for idle/break is elapsed minus active work
+  const maxRemainingForBreaks = Math.max(0, maxAllowedSeconds - active);
+  const combinedBreaks = idle + pause;
+
+  if (combinedBreaks > maxRemainingForBreaks) {
+    if (combinedBreaks > 0) {
+      idle = Math.round((idle / combinedBreaks) * maxRemainingForBreaks);
+      pause = maxRemainingForBreaks - idle;
     } else {
-      active = maxAllowedSeconds - combinedBreaks;
+      idle = 0;
+      pause = 0;
     }
   }
 

@@ -92,34 +92,21 @@ export async function uploadActivityBatch(req: AuthenticatedRequest, res: Respon
     // Group duration seconds by actual calendar date in company timezone
     const dateGroups: Record<string, { active: number; idle: number; pause: number; minTime: Date }> = {};
 
-    const isZeroInput = (clicksPerMinute === 0 || clicksPerMinute === undefined) && 
-                        (keysPerMinute === 0 || keysPerMinute === undefined);
-
     const createRecords = activities.map((item) => {
-      const isItemZeroInput = (item.mouseClicks === 0 || item.mouseClicks === undefined) &&
-                              (item.keystrokes === 0 || item.keystrokes === undefined);
-      const isLockOrDesktop = !item.appName ||
-                              item.appName === 'Desktop' ||
-                              item.appName === 'Lock Screen' ||
-                              item.appName === 'explorer.exe' ||
-                              item.appName === 'Unknown Application' ||
-                              item.processName?.toLowerCase() === 'lockapp.exe' ||
-                              item.processName?.toLowerCase() === 'logonui.exe' ||
-                              item.processName?.toLowerCase() === 'explorer.exe';
+      const hasInput = (item.mouseClicks && item.mouseClicks > 0) || (item.keystrokes && item.keystrokes > 0);
+      const isLockScreen = item.processName?.toLowerCase() === 'lockapp.exe' ||
+                           item.processName?.toLowerCase() === 'logonui.exe' ||
+                           item.appName === 'Lock Screen';
 
-      const lowerTask = (item.taskName || taskName || '').toLowerCase();
-      const isMeetingOrCall = item.category === 'COMMUNICATION' ||
-                              lowerTask.includes('meeting') ||
-                              lowerTask.includes('call') ||
-                              lowerTask.includes('discussion') ||
-                              lowerTask.includes('client');
-
-      // Zero keyboard/mouse input during sample (unless on active meeting/call),
-      // lock screen, black screen, or explicit idle status is always counted as away/break.
-      const isEffectiveIdle = !!item.isIdle || 
-                              currentStatus === 'IDLE' || 
-                              isLockOrDesktop ||
-                              (!isMeetingOrCall && isZeroInput && isItemZeroInput);
+      // An activity is idle if the agent detected idle threshold, screen locked, or user paused.
+      // If mouse or keyboard input occurred during the sample, it is guaranteed ACTIVE WORK.
+      const isEffectiveIdle = !hasInput && (
+        isPaused ||
+        currentStatus === 'PAUSED' ||
+        currentStatus === 'IDLE' ||
+        !!item.isIdle ||
+        isLockScreen
+      );
 
       const activeTask = isEffectiveIdle ? 'Away / Idle Break' : (item.taskName || taskName || (isPaused ? (pauseReason || 'Break') : 'Active Task'));
       const { friendlyName, category } = resolveAppInfo(
@@ -140,7 +127,7 @@ export async function uploadActivityBatch(req: AuthenticatedRequest, res: Respon
         dateGroups[itemDate].minTime = itemRecordTime;
       }
 
-      if (isPaused || currentStatus === 'PAUSED') {
+      if (!hasInput && (isPaused || currentStatus === 'PAUSED')) {
         dateGroups[itemDate].pause += duration;
       } else if (isEffectiveIdle) {
         dateGroups[itemDate].idle += duration;
@@ -200,6 +187,11 @@ export async function uploadActivityBatch(req: AuthenticatedRequest, res: Respon
           }
         });
       } else {
+        // If employee has clocked out for today, do NOT alter closed shift or reopen
+        if (existingAtt.clockOutAt) {
+          continue;
+        }
+
         const rawActive = (existingAtt.totalActiveSeconds || 0) + stats.active;
         const rawIdle = (existingAtt.totalIdleSeconds || 0) + stats.idle;
         const rawPause = ((existingAtt as any).manualPauseSeconds || 0) + stats.pause;
@@ -215,7 +207,6 @@ export async function uploadActivityBatch(req: AuthenticatedRequest, res: Respon
         await prisma.attendance.update({
           where: { id: existingAtt.id },
           data: {
-            ...(isCatchUp ? {} : { clockOutAt: null }),
             totalActiveSeconds: sanitized.totalActiveSeconds,
             totalIdleSeconds: sanitized.totalIdleSeconds,
             manualPauseSeconds: sanitized.manualPauseSeconds,
@@ -236,19 +227,30 @@ export async function uploadActivityBatch(req: AuthenticatedRequest, res: Respon
       latestItem.category
     );
 
-    const anyItemIdle = createRecords.some(r => r.isIdle);
-    const userStatus = isPaused 
-      ? 'PAUSED' 
-      : ((anyItemIdle || currentStatus === 'IDLE') ? 'IDLE' : (currentStatus || 'ONLINE'));
-    const activeCurrentTask = taskName || latestItem.taskName || (isPaused ? (pauseReason || 'Break') : (userStatus === 'IDLE' ? 'Away / Idle Break' : 'Active Task'));
+    const latestRecord = createRecords[createRecords.length - 1];
+    const isLatestIdle = latestRecord ? latestRecord.isIdle : false;
+    const hasAnyInput = (clicksPerMinute && clicksPerMinute > 0) ||
+                        (keysPerMinute && keysPerMinute > 0) ||
+                        createRecords.some(r => (r.mouseClicks && r.mouseClicks > 0) || (r.keystrokes && r.keystrokes > 0));
+
+    let userStatus: 'ONLINE' | 'OFFLINE' | 'IDLE' | 'PAUSED' = 'ONLINE';
+    if (hasAnyInput) {
+      userStatus = 'ONLINE';
+    } else if (isPaused || currentStatus === 'PAUSED') {
+      userStatus = 'PAUSED';
+    } else if (isLatestIdle || currentStatus === 'IDLE') {
+      userStatus = 'IDLE';
+    }
+
+    const activeCurrentTask = taskName || latestItem.taskName || (userStatus === 'PAUSED' ? (pauseReason || 'Break') : (userStatus === 'IDLE' ? 'Away / Idle Break' : 'Active Task'));
 
     if (!isCatchUp) {
       await prisma.user.update({
         where: { id: userId },
         data: {
           status: userStatus,
-          pauseReason: isPaused ? (pauseReason || 'Break') : null,
-          pauseComment: isPaused ? (pauseComment || null) : null,
+          pauseReason: userStatus === 'PAUSED' ? (pauseReason || 'Break') : null,
+          pauseComment: userStatus === 'PAUSED' ? (pauseComment || null) : null,
           currentTask: activeCurrentTask,
           lastActiveAt: now,
           currentApp: resolvedLatest.friendlyName,
@@ -259,8 +261,8 @@ export async function uploadActivityBatch(req: AuthenticatedRequest, res: Respon
 
       socketService.broadcastLiveActivity(userId, {
         status: userStatus,
-        pauseReason: isPaused ? (pauseReason || 'Break') : null,
-        pauseComment: isPaused ? (pauseComment || null) : null,
+        pauseReason: userStatus === 'PAUSED' ? (pauseReason || 'Break') : null,
+        pauseComment: userStatus === 'PAUSED' ? (pauseComment || null) : null,
         currentTask: activeCurrentTask,
         currentApp: resolvedLatest.friendlyName,
         currentTitle: latestItem.windowTitle,
@@ -324,6 +326,15 @@ export async function clockOutHandler(req: AuthenticatedRequest, res: Response) 
         data: { clockOutAt: now }
       });
     }
+
+    // Broadcast OFFLINE immediately to all connected Admin dashboards
+    socketService.broadcastUserPresence(userId, 'OFFLINE');
+    socketService.broadcastLiveActivity(userId, {
+      status: 'OFFLINE',
+      pauseReason: null,
+      pauseComment: null,
+      lastActiveAt: now
+    });
 
     return res.status(200).json({ success: true, message: 'Clocked out successfully' });
   } catch (error: any) {

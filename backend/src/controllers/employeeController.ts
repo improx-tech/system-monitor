@@ -151,7 +151,7 @@ export async function getMyTimeline(req: AuthenticatedRequest, res: Response) {
       attendance: sanitizedAtt ? {
         ...attendance,
         totalActiveSeconds: sanitizedAtt.totalActiveSeconds,
-        totalIdleSeconds: sanitizedAtt.combinedBreakSeconds,
+        totalIdleSeconds: sanitizedAtt.totalIdleSeconds,
         manualPauseSeconds: sanitizedAtt.manualPauseSeconds,
         totalWorkSeconds: sanitizedAtt.totalWorkSeconds
       } : {

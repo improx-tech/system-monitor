@@ -1,26 +1,60 @@
 import { prisma } from '../config/prisma';
 import { socketService } from './socketService';
-import { sanitizeAttendanceTimes } from '../utils/timeZone';
+import { sanitizeAttendanceTimes, getCompanyTodayString } from '../utils/timeZone';
 
 export function startHeartbeatSupervisor() {
   setInterval(async () => {
     try {
       const now = new Date();
-      const awayThreshold = new Date(Date.now() - 40000); // 40 seconds of no telemetry
+      const todayStr = getCompanyTodayString(now);
+      const awayThreshold = new Date(Date.now() - 90000); // 90 seconds (4.5 intervals) of no telemetry
       const maxInactivityThreshold = new Date(Date.now() - 4 * 60 * 60 * 1000); // 4 hours
 
-      // 1. Detect users who were ONLINE or IDLE but stopped sending telemetry (laptop slept / screen locked)
+      // 1. Immediately ensure any employee who has clocked out today is marked OFFLINE (never PAUSED or ONLINE)
+      await prisma.user.updateMany({
+        where: {
+          isActive: true,
+          status: { not: 'OFFLINE' },
+          attendances: {
+            some: {
+              date: todayStr,
+              clockOutAt: { not: null }
+            },
+            none: {
+              date: todayStr,
+              clockOutAt: null
+            }
+          }
+        },
+        data: {
+          status: 'OFFLINE',
+          pauseReason: null,
+          pauseComment: null,
+          currentTask: null,
+          currentApp: null,
+          currentTitle: null,
+          currentDomain: null
+        }
+      });
+
+      // 2. Detect users with an OPEN shift who stopped sending telemetry (laptop slept / screen locked)
       const inactiveUsers = await prisma.user.findMany({
         where: {
           isActive: true,
           status: { in: ['ONLINE', 'IDLE'] },
-          lastActiveAt: { lt: awayThreshold }
+          lastActiveAt: { lt: awayThreshold },
+          attendances: {
+            some: {
+              date: todayStr,
+              clockOutAt: null
+            }
+          }
         },
         select: { id: true, name: true, lastActiveAt: true }
       });
 
       for (const user of inactiveUsers) {
-        // Transition user to PAUSED (Break)
+        // Transition active shift user to PAUSED (Break)
         await prisma.user.update({
           where: { id: user.id },
           data: {
