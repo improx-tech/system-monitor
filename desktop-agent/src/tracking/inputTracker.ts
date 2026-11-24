@@ -15,10 +15,10 @@ if (process.platform === 'win32') {
 export class InputTracker {
   private clicksCount = 0;
   private keystrokesCount = 0;
-  private idleThresholdSeconds = 60; // 1 minute default
+  private idleThresholdSeconds = 120; // 2 minutes default
   private pollingTimer: NodeJS.Timeout | null = null;
 
-  constructor(idleThresholdMinutes = 1) {
+  constructor(idleThresholdMinutes = 2) {
     this.idleThresholdSeconds = idleThresholdMinutes * 60;
     this.startGlobalInputPolling();
   }

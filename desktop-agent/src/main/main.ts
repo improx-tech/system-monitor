@@ -37,7 +37,7 @@ class AgentApplication {
   private screenshotTimer: NodeJS.Timeout | null = null;
 
   private screenshotIntervalMinutes = 10;
-  private idleThresholdMinutes = 1; // 1 minute idle/break threshold (detects black screen / away)
+  private idleThresholdMinutes = 2; // 2 minutes (120s) idle threshold
   private sampleDurationSeconds = 20; // 20 seconds sample duration (3 logs per min)
   private lastSample: TrackerSample | null = null;
   private lastScreenshotTime = 0;
@@ -155,22 +155,20 @@ class AgentApplication {
     });
 
     powerMonitor.on('resume', async () => {
-      console.log('⏰ System woke up from sleep.');
+      console.log('⏰ System woke up from sleep -> Resuming tracking.');
       if (this.isTracking) {
         this.sleepStartTime = 0;
-        await this.refreshTodayAttendance();
         this.resumeTracking();
+        await this.refreshTodayAttendance();
       }
     });
 
     powerMonitor.on('unlock-screen', async () => {
-      console.log('🔓 Screen unlocked.');
+      console.log('🔓 Screen unlocked -> Resuming tracking.');
       if (this.isTracking) {
         this.sleepStartTime = 0;
+        this.resumeTracking();
         await this.refreshTodayAttendance();
-        if (this.isPaused && this.pauseReason.includes('Screen Lock')) {
-          this.resumeTracking();
-        }
       }
     });
   }
@@ -429,10 +427,10 @@ class AgentApplication {
         [breakItem],
         0,
         0,
-        'PAUSED',
-        true,
-        reason,
-        reason,
+        this.isPaused ? 'PAUSED' : 'ONLINE',
+        this.isPaused,
+        this.pauseReason,
+        this.pauseComment,
         this.currentTask
       );
       if (res && res.success) {
@@ -667,10 +665,10 @@ class AgentApplication {
       const elapsedSinceLastTick = now - this.lastTickTimestamp;
       this.lastTickTimestamp = now;
 
-      // Detect if system slept or froze between ticks
-      if (elapsedSinceLastTick > (this.sampleDurationSeconds * 1000 + 15000)) {
+      // Detect if system slept or froze between ticks (>90s gap, e.g. laptop closed)
+      if (elapsedSinceLastTick > (this.sampleDurationSeconds * 1000 + 70000)) {
         const sleepGapSeconds = Math.round((elapsedSinceLastTick - this.sampleDurationSeconds * 1000) / 1000);
-        if (sleepGapSeconds >= 10) {
+        if (sleepGapSeconds >= 60) {
           const gapStartTime = new Date(now - elapsedSinceLastTick);
           console.log(`⏳ Detected ${sleepGapSeconds}s gap between ticks (laptop was asleep). Crediting as break.`);
           await this.recordBreakTime(sleepGapSeconds, 'Laptop Sleep / Inactive Break', gapStartTime);
@@ -682,6 +680,13 @@ class AgentApplication {
       const sample = await this.tracker.getSample();
       this.lastSample = sample;
 
+      // AUTO-RESUME IF ACTIVE USER INPUT DETECTED:
+      // If mouse clicks or keys are registered, the employee is actively working!
+      if ((sample.clicks > 0 || sample.keys > 0) && this.isPaused) {
+        console.log('🟢 Active user input detected while paused -> Auto-resuming tracking!');
+        this.resumeTracking();
+      }
+
       const lowerTask = (this.currentTask || '').toLowerCase();
       const isMeetingOrProductiveTask =
         this.taskCategory === 'COMMUNICATION' ||
@@ -691,7 +696,9 @@ class AgentApplication {
         lowerTask.includes('client') ||
         lowerTask.includes('paperwork');
 
-      const effectiveIdle = this.isPaused ? true : (isMeetingOrProductiveTask ? false : sample.isIdle);
+      const hasInput = sample.clicks > 0 || sample.keys > 0;
+      // If employee has input or is in meeting, it is NEVER idle
+      const effectiveIdle = this.isPaused ? true : (hasInput || isMeetingOrProductiveTask ? false : sample.isIdle);
 
       const logItem = {
         appName: sample.appName,
@@ -708,11 +715,11 @@ class AgentApplication {
         recordedAt: new Date().toISOString()
       };
 
-      const clicksPerMin = this.isPaused ? 0 : Math.round((sample.clicks / this.sampleDurationSeconds) * 60);
-      const keysPerMin = this.isPaused ? 0 : Math.round((sample.keys / this.sampleDurationSeconds) * 60);
+      const clicksPerMin = Math.round((sample.clicks / this.sampleDurationSeconds) * 60);
+      const keysPerMin = Math.round((sample.keys / this.sampleDurationSeconds) * 60);
       const currentStatus = this.isPaused ? 'PAUSED' : (effectiveIdle ? 'IDLE' : 'ONLINE');
 
-      console.log(`📡 [20s Telemetry] Task: ${this.currentTask} | App: ${sample.appName} | Status: ${currentStatus}`);
+      console.log(`📡 [20s Telemetry] Task: ${this.currentTask} | App: ${sample.appName} | Clicks: ${sample.clicks} | Keys: ${sample.keys} | Status: ${currentStatus}`);
 
       const res = await this.syncService.sendActivityBatch(
         [logItem],

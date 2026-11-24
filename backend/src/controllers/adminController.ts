@@ -817,7 +817,7 @@ export async function getActivityTimeline(req: Request, res: Response) {
       attendance: sanitizedAtt ? {
         ...attendance,
         totalActiveSeconds: sanitizedAtt.totalActiveSeconds,
-        totalIdleSeconds: sanitizedAtt.combinedBreakSeconds,
+        totalIdleSeconds: sanitizedAtt.totalIdleSeconds,
         manualPauseSeconds: sanitizedAtt.manualPauseSeconds,
         totalWorkSeconds: sanitizedAtt.totalWorkSeconds
       } : {
