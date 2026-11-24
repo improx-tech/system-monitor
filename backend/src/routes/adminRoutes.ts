@@ -5,6 +5,7 @@ import {
   createEmployee,
   updateEmployee,
   deleteEmployee,
+  resetEmployeeDay,
   getRealtimeGrid,
   getScreenshots,
   exportScreenshotsZip,
@@ -46,6 +47,7 @@ router.get('/employees', getEmployees);
 router.post('/employees', createEmployee);
 router.put('/employees/:id', updateEmployee);
 router.delete('/employees/:id', deleteEmployee);
+router.post('/employees/:id/reset-today', resetEmployeeDay);
 
 // Real-Time Grid
 router.get('/realtime', getRealtimeGrid);
