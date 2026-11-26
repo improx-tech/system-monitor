@@ -103,7 +103,8 @@ export const LiveGrid: React.FC = () => {
 
     const matchesStatus =
       filterStatus === 'ALL' ||
-      emp.status === filterStatus;
+      emp.status === filterStatus ||
+      (filterStatus === 'IDLE' && emp.status === 'PAUSED');
 
     return matchesSearch && matchesStatus;
   });
@@ -134,17 +135,22 @@ export const LiveGrid: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-xl p-1 text-xs shadow-xs">
-            {['ALL', 'ONLINE', 'IDLE', 'OFFLINE'].map((status) => (
+            {[
+              { id: 'ALL', label: 'All' },
+              { id: 'ONLINE', label: 'Online' },
+              { id: 'IDLE', label: 'Idle / Break' },
+              { id: 'OFFLINE', label: 'Offline' }
+            ].map(({ id, label }) => (
               <button
-                key={status}
-                onClick={() => setFilterStatus(status)}
+                key={id}
+                onClick={() => setFilterStatus(id)}
                 className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
-                  filterStatus === status
+                  filterStatus === id
                     ? 'bg-sky-600 text-white shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                {status}
+                {label}
               </button>
             ))}
           </div>

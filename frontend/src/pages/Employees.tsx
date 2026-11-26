@@ -281,31 +281,35 @@ export const Employees: React.FC = () => {
                 {/* Employee Info Strip & Weekly Productivity */}
                 <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 rounded-2xl bg-sky-600 text-white font-black flex items-center justify-center text-lg shadow-md shadow-sky-600/20">
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <div className="w-12 h-12 rounded-2xl bg-sky-600 text-white font-black flex items-center justify-center text-lg shadow-md shadow-sky-600/20 shrink-0">
                         {selectedEmployee.name.charAt(0).toUpperCase()}
                       </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h2 className="text-lg font-black text-slate-900">{selectedEmployee.name}</h2>
-                          <span className="px-2.5 py-0.5 rounded-md bg-slate-100 text-slate-700 text-[10px] font-extrabold uppercase border border-slate-200">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h2 className="text-lg font-black text-slate-900 truncate" title={selectedEmployee.name}>
+                            {selectedEmployee.name}
+                          </h2>
+                          <span className="px-2.5 py-0.5 rounded-md bg-slate-100 text-slate-700 text-[10px] font-extrabold uppercase border border-slate-200 shrink-0">
                             {selectedEmployee.department || 'General'}
                           </span>
                         </div>
-                        <p className="text-xs text-slate-500 font-medium">{selectedEmployee.email} • Shift: {selectedEmployee.shift || '09:00 - 18:00'}</p>
+                        <p className="text-xs text-slate-500 font-medium truncate" title={`${selectedEmployee.email} • Shift: ${selectedEmployee.shift || '09:00 - 18:00'}`}>
+                          {selectedEmployee.email} • Shift: {selectedEmployee.shift || '09:00 - 18:00'}
+                        </p>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
                       <button
                         onClick={() => handleResetEmployeeTime(selectedEmployee.id, selectedEmployee.name)}
-                        className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-xs"
+                        className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-xs whitespace-nowrap"
                         title="Reset time tracking data for this employee for selected date back to 0m"
                       >
                         <RotateCcw className="w-3.5 h-3.5" />
                         <span>Reset Today (0m)</span>
                       </button>
-                      <span className={`px-3 py-1 rounded-xl text-xs font-extrabold ${
+                      <span className={`px-3 py-1 rounded-xl text-xs font-extrabold whitespace-nowrap ${
                         (selectedEmployee.clockOutAt || (selectedEmployee as any).attendances?.[0]?.clockOutAt)
                           ? 'bg-slate-100 text-slate-600'
                           : selectedEmployee.status === 'ONLINE' || (selectedEmployee.status as string) === 'WORKING'

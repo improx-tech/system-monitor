@@ -47,6 +47,7 @@ const liveStatusText = document.getElementById('liveStatusText');
 
 // Task & Tracking Controls
 const taskInput = document.getElementById('taskInput');
+const btnAddTask = document.getElementById('btnAddTask');
 const btnPlay = document.getElementById('btnPlay');
 const btnStop = document.getElementById('btnStop');
 const catPills = document.querySelectorAll('.cat-pill');
@@ -220,7 +221,12 @@ let appsSubTab = 'summary';
 async function loadDesktopTimeline(dateStr) {
   const container = (document.getElementById('desktopTimelineContainer') || document.getElementById('timelineScrubberBar'));
   if (!container || !ipcRenderer) return;
-  container.innerHTML = '<p style="color: #64748b; font-size: 12px; font-weight: 600;">Loading timeline for ' + dateStr + '...</p>';
+  container.innerHTML = `
+    <div class="desktop-loader-box">
+      <div class="desktop-spinner"></div>
+      <p>Loading 24-hour scrubber timeline for ${dateStr}...</p>
+    </div>
+  `;
 
   try {
     const data = await ipcRenderer.invoke('get-my-timeline', dateStr);
@@ -447,7 +453,12 @@ function renderDesktopTimeline(data, dateStr) {
 async function loadDesktopScreenshots(dateStr) {
   const container = document.getElementById('desktopShotsGrid');
   if (!container || !ipcRenderer) return;
-  container.innerHTML = '<p class="muted-text">Loading captures for ' + dateStr + '...</p>';
+  container.innerHTML = `
+    <div class="desktop-loader-box" style="grid-column: 1 / -1;">
+      <div class="desktop-spinner"></div>
+      <p>Loading verified screen captures for ${dateStr}...</p>
+    </div>
+  `;
 
   try {
     const list = await ipcRenderer.invoke('get-my-screenshots', dateStr);
@@ -660,7 +671,12 @@ async function loadDesktopApps(dateStr) {
   if (!container || !ipcRenderer) return;
 
   if (appsSubTab === 'stream') {
-    container.innerHTML = '<p style="color: #64748b; font-size: 12px; font-weight: 600;">Loading 20-second live telemetry stream for ' + dateStr + '...</p>';
+    container.innerHTML = `
+      <div class="desktop-loader-box">
+        <div class="desktop-spinner"></div>
+        <p>Loading 20-second live telemetry stream for ${dateStr}...</p>
+      </div>
+    `;
     try {
       const data = await ipcRenderer.invoke('get-my-timeline', dateStr);
       const blocks = (data && data.activityBlocks) ? data.activityBlocks : [];
@@ -721,7 +737,12 @@ async function loadDesktopApps(dateStr) {
   }
 
   // Summary sub-tab
-  container.innerHTML = '<p style="color: #64748b; font-size: 12px; font-weight: 600;">Loading applications and web history for ' + dateStr + '...</p>';
+  container.innerHTML = `
+    <div class="desktop-loader-box">
+      <div class="desktop-spinner"></div>
+      <p>Loading application and website history for ${dateStr}...</p>
+    </div>
+  `;
   try {
     const data = await ipcRenderer.invoke('get-my-analytics', dateStr);
     const appsList = Array.isArray(data) ? data : (data.apps || []);
@@ -790,7 +811,12 @@ async function loadDesktopApps(dateStr) {
 async function loadDesktopLogs(dateStr) {
   const container = document.getElementById('desktopLogsContainer');
   if (!container || !ipcRenderer) return;
-  container.innerHTML = '<p style="color: #64748b; font-size: 12px; font-weight: 600;">Loading timesheet and productivity data for ' + dateStr + '...</p>';
+  container.innerHTML = `
+    <div class="desktop-loader-box">
+      <div class="desktop-spinner"></div>
+      <p>Loading employee timesheet and productivity data for ${dateStr}...</p>
+    </div>
+  `;
 
   try {
     const [timelineData, reportsList] = await Promise.all([
@@ -1069,32 +1095,73 @@ catPills.forEach((pill) => {
   });
 });
 
-// Play / Start Button
-if (btnPlay) {
-  btnPlay.addEventListener('click', async () => {
-    const task = (taskInput && taskInput.value ? taskInput.value : 'General Work').trim();
-    currentTaskName = task;
-    if (displayTaskTitle) displayTaskTitle.textContent = task;
+// Unified Task Start & Add Handler with Instant Feedback & Loaders
+let isAddingTask = false;
 
+async function handleStartOrAddTask() {
+  if (isAddingTask) return;
+  isAddingTask = true;
+
+  const task = (taskInput && taskInput.value ? taskInput.value : 'General Work').trim();
+  currentTaskName = task;
+  if (displayTaskTitle) displayTaskTitle.textContent = task;
+
+  // Visual loader on button
+  if (btnAddTask) {
+    btnAddTask.disabled = true;
+    btnAddTask.innerHTML = '<span class="agent-spinner-sm"></span> <span>Saving...</span>';
+  }
+
+  // Prepend instant visual loader in frontSessionList so employee sees immediate response
+  const frontContainer = document.getElementById('frontSessionList');
+  if (frontContainer) {
+    const existingContent = frontContainer.innerHTML;
+    frontContainer.innerHTML = `
+      <div class="agent-inline-loader" id="taskAddingIndicator">
+        <div class="agent-inline-spinner"></div>
+        <span>Adding task session <strong>"${task}"</strong> and syncing timeline...</span>
+      </div>
+      ${existingContent}
+    `;
+  }
+
+  try {
     if (ipcRenderer) {
       await ipcRenderer.invoke('start-task', { taskName: task, category: currentCategory });
     }
     setRunningState(true, false);
-  });
+    await loadFrontBreakdown();
+  } catch (err) {
+    console.warn('Failed to start task:', err);
+  } finally {
+    if (btnAddTask) {
+      btnAddTask.disabled = false;
+      btnAddTask.innerHTML = '<span>✓</span> <span>Added</span>';
+      setTimeout(() => {
+        if (btnAddTask) {
+          btnAddTask.innerHTML = '<span id="btnAddTaskIcon">➕</span> <span id="btnAddTaskText">Add Task</span>';
+        }
+      }, 1500);
+    }
+    isAddingTask = false;
+  }
 }
 
-// Enter in Task input starts tracking
+// Explicit Add Task Button
+if (btnAddTask) {
+  btnAddTask.addEventListener('click', handleStartOrAddTask);
+}
+
+// Play / Start Button
+if (btnPlay) {
+  btnPlay.addEventListener('click', handleStartOrAddTask);
+}
+
+// Enter in Task input adds task & starts tracking
 if (taskInput) {
   taskInput.addEventListener('keydown', async (e) => {
     if (e.key === 'Enter') {
-      const task = (taskInput.value || 'General Work').trim();
-      currentTaskName = task;
-      if (displayTaskTitle) displayTaskTitle.textContent = task;
-
-      if (ipcRenderer) {
-        await ipcRenderer.invoke('start-task', { taskName: task, category: currentCategory });
-      }
-      setRunningState(true, false);
+      await handleStartOrAddTask();
     }
   });
 }

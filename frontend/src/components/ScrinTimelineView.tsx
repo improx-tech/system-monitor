@@ -615,23 +615,23 @@ export const ActivityTimelineView: React.FC<ActivityTimelineViewProps> = ({
                 className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs hover:border-slate-300 transition-all space-y-3"
               >
                 {/* Interval Header Line */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs font-bold text-slate-500 font-mono tracking-tight">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3 min-w-0">
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1 flex-wrap sm:flex-nowrap">
+                    <span className="text-xs font-bold text-slate-500 font-mono tracking-tight shrink-0">
                       {inv.startTime ? `${new Date(inv.startTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })} - ${new Date(inv.endTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })}` : inv.timeRangeFormatted}
                     </span>
-                    <span className={`w-2 h-2 rounded-full ${statusDotClass}`} />
-                    <span className="text-sm font-black text-slate-900">
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${statusDotClass}`} />
+                    <span className="text-sm font-black text-slate-900 truncate min-w-0" title={inv.taskName}>
                       {inv.taskName}
                     </span>
                     <span
-                      className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${catStyle.bg} ${catStyle.text} ${catStyle.border}`}
+                      className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border shrink-0 ${catStyle.bg} ${catStyle.text} ${catStyle.border}`}
                     >
                       {catStyle.label}
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-3 text-xs font-semibold text-slate-500">
+                  <div className="flex items-center gap-3 text-xs font-semibold text-slate-500 shrink-0">
                     <span>{inv.durationMinutes} min{inv.durationMinutes > 1 ? 's' : ''}</span>
                     {inv.clicks > 0 && (
                       <span className="flex items-center gap-1 text-slate-600">

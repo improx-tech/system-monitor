@@ -170,7 +170,10 @@ export const Timesheets: React.FC = () => {
                         <td className="px-5 py-3.5 text-amber-700 font-bold">{formatHoursToTime(t.idleHours)}</td>
                         <td className="px-5 py-3.5">
                           {(t as any).pauseReason ? (
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-[11px] font-bold bg-amber-100 text-amber-900 border border-amber-300 shadow-xs">
+                            <span
+                              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-[11px] font-bold bg-amber-100 text-amber-900 border border-amber-300 shadow-xs max-w-[200px] truncate"
+                              title={`${(t as any).pauseReason || ''} ${(t as any).pauseComment ? `("${(t as any).pauseComment}")` : ''}`}
+                            >
                               {(t as any).pauseReason} {(t as any).pauseComment ? `("${(t as any).pauseComment}")` : ''}
                             </span>
                           ) : !t.clockOutAt ? (
