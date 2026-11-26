@@ -65,7 +65,10 @@ class AgentApplication {
       if (fs.existsSync(this.configFilePath)) {
         const raw = fs.readFileSync(this.configFilePath, 'utf-8');
         const data = JSON.parse(raw);
-        if (data.serverUrl) this.serverUrl = data.serverUrl;
+        if (data.serverUrl) {
+          this.serverUrl = data.serverUrl;
+          this.autoUpdater.setServerUrl(data.serverUrl);
+        }
         if (data.token) {
           this.syncService.setToken(data.token);
           this.currentUser = data.user;
@@ -664,6 +667,8 @@ class AgentApplication {
       try {
         this.serverUrl = serverUrl;
         this.syncService.setServerUrl(serverUrl);
+        this.autoUpdater.setServerUrl(serverUrl);
+        this.autoUpdater.checkForUpdates();
         const data = await this.syncService.login(email, password);
         console.log('>>> syncService.login succeeded for user:', data.user?.name);
 

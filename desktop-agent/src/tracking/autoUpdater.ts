@@ -5,10 +5,10 @@ import { spawn } from 'child_process';
 import axios from 'axios';
 
 export class AutoUpdateManager {
-  private currentVersion = '1.0.0';
+  private currentVersion = '1.0.1';
   private updatePending = false;
   private downloadedInstallerPath: string | null = null;
-  private serverUrl = 'http://200.141.2.53';
+  private serverUrl = 'https://monitor.improxtech.com';
   private checkTimer: NodeJS.Timeout | null = null;
 
   constructor(serverUrl?: string) {
@@ -118,19 +118,26 @@ export class AutoUpdateManager {
     return this.updatePending && !!this.downloadedInstallerPath && fs.existsSync(this.downloadedInstallerPath);
   }
 
-  public applyUpdateIfPending(): boolean {
+  public applyUpdateIfPending(quitCurrentApp: boolean = false): boolean {
     if (!this.hasPendingUpdate() || !this.downloadedInstallerPath) return false;
 
-    console.log(`🔄 Applying Desktop Agent silent update (${this.downloadedInstallerPath}) during break/clock-out/shutdown...`);
+    console.log(`🔄 Applying Desktop Agent silent update (${this.downloadedInstallerPath})...`);
     try {
-      // Spawn installer with NSIS silent flag /S
-      const child = spawn(this.downloadedInstallerPath, ['/S'], {
+      const installerPath = this.downloadedInstallerPath;
+      // Wait 2 seconds for current process to exit, then run silent installer /S
+      const psCmd = `Start-Sleep -Seconds 2; Start-Process -FilePath "${installerPath}" -ArgumentList "/S"`;
+      const child = spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', psCmd], {
         detached: true,
         stdio: 'ignore'
       });
       child.unref();
 
       this.updatePending = false;
+      if (quitCurrentApp && app) {
+        setTimeout(() => {
+          app.quit();
+        }, 500);
+      }
       return true;
     } catch (e) {
       console.error('Failed to trigger silent update installer:', e);
