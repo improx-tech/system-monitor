@@ -10,6 +10,44 @@ export function startHeartbeatSupervisor() {
       const awayThreshold = new Date(Date.now() - 90000); // 90 seconds (4.5 intervals) of no telemetry
       const maxInactivityThreshold = new Date(Date.now() - 4 * 60 * 60 * 1000); // 4 hours
 
+      // 0. Auto-heal: If an employee has recent activity (<15 mins) but has a stuck clockOutAt from app restart/exit, clear it and restore ONLINE
+      const activeWindowCutoff = new Date(Date.now() - 15 * 60 * 1000);
+      const activeUsersWithStuckClockout = await prisma.user.findMany({
+        where: {
+          isActive: true,
+          lastActiveAt: { gte: activeWindowCutoff },
+          attendances: {
+            some: {
+              date: todayStr,
+              clockOutAt: { not: null }
+            }
+          }
+        },
+        select: { id: true, name: true, lastActiveAt: true }
+      });
+
+      for (const u of activeUsersWithStuckClockout) {
+        await prisma.attendance.updateMany({
+          where: {
+            userId: u.id,
+            date: todayStr,
+            clockOutAt: { not: null }
+          },
+          data: {
+            clockOutAt: null
+          }
+        });
+        await prisma.user.update({
+          where: { id: u.id },
+          data: { status: 'ONLINE' }
+        });
+        socketService.broadcastLiveActivity(u.id, {
+          status: 'ONLINE',
+          lastActiveAt: u.lastActiveAt || now
+        });
+        console.log(`🟢 [Auto-Heal] Reopened shift and restored ONLINE for active employee: ${u.name}`);
+      }
+
       // 1. Immediately ensure any employee who has clocked out today and is inactive (>90s) is marked OFFLINE
       await prisma.user.updateMany({
         where: {
