@@ -1,6 +1,6 @@
 {
   "name": "improx-monitor-agent",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Silent Enterprise Background Agent for Improx Monitoring System",
   "author": "Improx Group",
   "main": "dist/main/main.js",

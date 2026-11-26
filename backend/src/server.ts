@@ -41,17 +41,21 @@ app.use('/updates', express.static(updatesDir));
 
 // Direct Desktop Agent Download Route (Windows .exe)
 app.get(['/download/agent', '/api/download/agent', '/download/agent/win'], (req, res) => {
-  const possiblePaths = [
-    path.join(updatesDir, 'Improx Monitoring System Setup 1.0.0.exe'),
-    path.join(__dirname, '../../desktop-agent/release/Improx Monitoring System Setup 1.0.0.exe'),
-    path.join(updatesDir, 'Improx-Agent-Setup.exe')
-  ];
-
   let foundPath = '';
-  for (const p of possiblePaths) {
-    if (fs.existsSync(p)) {
-      foundPath = p;
-      break;
+  if (fs.existsSync(updatesDir)) {
+    const files = fs.readdirSync(updatesDir).filter(f => f.endsWith('.exe') && f.includes('Setup')).sort().reverse();
+    if (files.length > 0) {
+      foundPath = path.join(updatesDir, files[0]);
+    }
+  }
+
+  if (!foundPath) {
+    const downloadsDir = path.join(__dirname, '../downloads');
+    if (fs.existsSync(downloadsDir)) {
+      const files = fs.readdirSync(downloadsDir).filter(f => f.endsWith('.exe')).sort().reverse();
+      if (files.length > 0) {
+        foundPath = path.join(downloadsDir, files[0]);
+      }
     }
   }
 

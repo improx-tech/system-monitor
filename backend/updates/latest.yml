@@ -1,8 +1,8 @@
-version: 1.0.0
+version: 1.0.1
 files:
-  - url: Improx Monitoring System Setup 1.0.0.exe
-    sha512: zG8aXb3sn19LmTsUJJysCF92BrkqTM7GsqfuQ6PqXVQzIKSA79nrM8s5f0BJh134wP9WQ8nq5CZS4pgz7KsDPQ==
-    size: 79766545
-path: Improx Monitoring System Setup 1.0.0.exe
-sha512: zG8aXb3sn19LmTsUJJysCF92BrkqTM7GsqfuQ6PqXVQzIKSA79nrM8s5f0BJh134wP9WQ8nq5CZS4pgz7KsDPQ==
-releaseDate: '2026-11-26T09:20:00.000Z'
+  - url: Improx Monitoring System Setup 1.0.1.exe
+    sha512: 90duW21El1l+XdcjXAEOcsgz6xl1UGpxbDfuXgQC8kF0dz0gZfQIN8aKHE/68lOqyU6XjsfRJ/GOfF7pOh71mQ==
+    size: 79764827
+path: Improx Monitoring System Setup 1.0.1.exe
+sha512: 90duW21El1l+XdcjXAEOcsgz6xl1UGpxbDfuXgQC8kF0dz0gZfQIN8aKHE/68lOqyU6XjsfRJ/GOfF7pOh71mQ==
+releaseDate: '2026-11-26T10:33:00.000Z'
