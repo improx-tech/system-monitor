@@ -145,7 +145,9 @@ export const Timeline: React.FC = () => {
               <div>
                 <p className="text-[10px] uppercase font-bold text-slate-400">Clock Out</p>
                 <p className="text-sm font-black text-slate-900">
-                  {timelineData.attendance?.clockOutAt
+                  {selectedEmployee?.status === 'ONLINE' || (selectedEmployee?.status as string) === 'WORKING' || selectedEmployee?.status === 'PAUSED'
+                    ? 'Active / Working'
+                    : timelineData.attendance?.clockOutAt
                     ? new Date(timelineData.attendance.clockOutAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                     : 'Active / Working'}
                 </p>

@@ -209,12 +209,11 @@ export const Employees: React.FC = () => {
             <div className="space-y-2 max-h-[75vh] overflow-y-auto pr-1">
               {filtered.map((emp) => {
                 const isSelected = emp.id === selectedUserId;
-                const isEmpClockedOut = !!(emp.clockOutAt || (emp as any).attendances?.[0]?.clockOutAt);
-                const statusDot = isEmpClockedOut
-                  ? 'bg-slate-300'
-                  : emp.status === 'ONLINE' || (emp.status as string) === 'WORKING'
+                const isOnline = emp.status === 'ONLINE' || (emp.status as string) === 'WORKING';
+                const isPaused = emp.status === 'PAUSED' || emp.status === 'IDLE';
+                const statusDot = isOnline
                   ? 'bg-emerald-500'
-                  : emp.status === 'PAUSED' || emp.status === 'IDLE'
+                  : isPaused
                   ? 'bg-amber-400'
                   : 'bg-slate-300';
 
@@ -310,20 +309,20 @@ export const Employees: React.FC = () => {
                         <span>Reset Today (0m)</span>
                       </button>
                       <span className={`px-3 py-1 rounded-xl text-xs font-extrabold whitespace-nowrap ${
-                        (selectedEmployee.clockOutAt || (selectedEmployee as any).attendances?.[0]?.clockOutAt)
-                          ? 'bg-slate-100 text-slate-600'
-                          : selectedEmployee.status === 'ONLINE' || (selectedEmployee.status as string) === 'WORKING'
+                        selectedEmployee.status === 'ONLINE' || (selectedEmployee.status as string) === 'WORKING'
                           ? 'bg-emerald-100 text-emerald-800'
                           : selectedEmployee.status === 'PAUSED' || selectedEmployee.status === 'IDLE'
                           ? 'bg-amber-100 text-amber-800'
+                          : (selectedEmployee.clockOutAt || (selectedEmployee as any).attendances?.[0]?.clockOutAt)
+                          ? 'bg-slate-100 text-slate-600'
                           : 'bg-slate-100 text-slate-600'
                       }`}>
-                        {(selectedEmployee.clockOutAt || (selectedEmployee as any).attendances?.[0]?.clockOutAt)
-                          ? '⚪ Shift Completed'
-                          : selectedEmployee.status === 'ONLINE' || (selectedEmployee.status as string) === 'WORKING'
+                        {selectedEmployee.status === 'ONLINE' || (selectedEmployee.status as string) === 'WORKING'
                           ? '🟢 Active Working'
                           : selectedEmployee.status === 'PAUSED' || selectedEmployee.status === 'IDLE'
                           ? '🟡 On Break'
+                          : (selectedEmployee.clockOutAt || (selectedEmployee as any).attendances?.[0]?.clockOutAt)
+                          ? '⚪ Shift Completed'
                           : '🔴 Logged Out'}
                       </span>
                     </div>
@@ -369,7 +368,9 @@ export const Employees: React.FC = () => {
                     <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 text-xs">
                       <span className="text-[10px] font-bold text-slate-400 uppercase block">Clock Out</span>
                       <span className="text-sm font-black text-slate-700">
-                        {timelineData?.attendance?.clockOutAt
+                        {selectedEmployee.status === 'ONLINE' || (selectedEmployee.status as string) === 'WORKING' || selectedEmployee.status === 'PAUSED'
+                          ? 'Active Shift'
+                          : timelineData?.attendance?.clockOutAt
                           ? new Date(timelineData.attendance.clockOutAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                           : 'Active Shift'}
                       </span>

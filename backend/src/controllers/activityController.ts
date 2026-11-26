@@ -187,18 +187,18 @@ export async function uploadActivityBatch(req: AuthenticatedRequest, res: Respon
           }
         });
       } else {
-        // If employee has clocked out for today, do NOT alter closed shift or reopen
-        if (existingAtt.clockOutAt) {
-          continue;
-        }
+        // If employee is actively working live today, resume/reopen the shift if previously clocked out
+        const todayStr = getCompanyTodayString(now);
+        const shouldReopenShift = !isCatchUp && (dateKey === todayStr);
 
         const rawActive = (existingAtt.totalActiveSeconds || 0) + stats.active;
         const rawIdle = (existingAtt.totalIdleSeconds || 0) + stats.idle;
         const rawPause = ((existingAtt as any).manualPauseSeconds || 0) + stats.pause;
 
+        // If reopening shift, pass clockOutAt as null so physical time bounding calculations include current wall-clock
         const sanitized = sanitizeAttendanceTimes({
           clockInAt: existingAtt.clockInAt,
-          clockOutAt: existingAtt.clockOutAt,
+          clockOutAt: shouldReopenShift ? null : existingAtt.clockOutAt,
           totalActiveSeconds: rawActive,
           totalIdleSeconds: rawIdle,
           manualPauseSeconds: rawPause
@@ -211,6 +211,7 @@ export async function uploadActivityBatch(req: AuthenticatedRequest, res: Respon
             totalIdleSeconds: sanitized.totalIdleSeconds,
             manualPauseSeconds: sanitized.manualPauseSeconds,
             totalWorkSeconds: sanitized.totalWorkSeconds,
+            ...(shouldReopenShift ? { clockOutAt: null } : {}),
             ...(isCatchUp ? {} : { pauseReason: isPaused ? (pauseReason || 'Break') : null })
           }
         });
