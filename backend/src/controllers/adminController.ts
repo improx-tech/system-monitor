@@ -173,8 +173,8 @@ export async function getEmployees(req: Request, res: Response) {
         totalWorkSec = sanitized.totalWorkSeconds;
       }
 
-      const isClockedOut = !!att?.clockOutAt;
-      const effectiveStatus = isClockedOut ? 'OFFLINE' : emp.status;
+      const isClockedOut = !!att?.clockOutAt && emp.status === 'OFFLINE';
+      const effectiveStatus = emp.status;
 
       return {
         id: emp.id,
@@ -188,7 +188,7 @@ export async function getEmployees(req: Request, res: Response) {
         currentTitle: isClockedOut ? null : emp.currentTitle,
         currentDomain: isClockedOut ? null : emp.currentDomain,
         clockInAt: att?.clockInAt || null,
-        clockOutAt: att?.clockOutAt || null,
+        clockOutAt: (emp.status === 'ONLINE' || emp.status === 'PAUSED' || emp.status === 'IDLE') ? null : (att?.clockOutAt || null),
         totalActiveSeconds: activeSec,
         totalIdleSeconds: combinedBreakIdle,
         manualPauseSeconds: pauseSec,
@@ -546,7 +546,7 @@ export async function getRealtimeGrid(req: Request, res: Response) {
       const att = emp.attendances[0];
       const latestScreen = emp.screenshots[0];
       const sanitized = att ? sanitizeAttendanceTimes(att, now) : { totalActiveSeconds: 0, combinedBreakSeconds: 0 };
-      const isClockedOut = !!att?.clockOutAt;
+      const isClockedOut = !!att?.clockOutAt && emp.status === 'OFFLINE';
       return {
         id: emp.id,
         name: emp.name,
@@ -855,7 +855,7 @@ export async function getActivityTimeline(req: Request, res: Response) {
     const [user, logs, attendance, screenshots, offlineTimes] = await Promise.all([
       prisma.user.findUnique({
         where: { id: userId },
-        select: { id: true, name: true, email: true, department: true, shift: true, currentTask: true }
+        select: { id: true, name: true, email: true, department: true, shift: true, currentTask: true, status: true }
       }),
       prisma.activityLog.findMany({
         where: {
@@ -899,6 +899,7 @@ export async function getActivityTimeline(req: Request, res: Response) {
       date: queryDate,
       attendance: sanitizedAtt ? {
         ...attendance,
+        clockOutAt: (user?.status === 'ONLINE' || user?.status === 'PAUSED' || user?.status === 'IDLE') ? null : attendance?.clockOutAt,
         totalActiveSeconds: sanitizedAtt.totalActiveSeconds,
         totalIdleSeconds: sanitizedAtt.totalIdleSeconds,
         manualPauseSeconds: sanitizedAtt.manualPauseSeconds,

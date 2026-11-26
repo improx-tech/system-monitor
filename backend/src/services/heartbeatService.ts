@@ -10,11 +10,12 @@ export function startHeartbeatSupervisor() {
       const awayThreshold = new Date(Date.now() - 90000); // 90 seconds (4.5 intervals) of no telemetry
       const maxInactivityThreshold = new Date(Date.now() - 4 * 60 * 60 * 1000); // 4 hours
 
-      // 1. Immediately ensure any employee who has clocked out today is marked OFFLINE (never PAUSED or ONLINE)
+      // 1. Immediately ensure any employee who has clocked out today and is inactive (>90s) is marked OFFLINE
       await prisma.user.updateMany({
         where: {
           isActive: true,
           status: { not: 'OFFLINE' },
+          lastActiveAt: { lt: awayThreshold },
           attendances: {
             some: {
               date: todayStr,
