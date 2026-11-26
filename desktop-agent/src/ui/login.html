@@ -779,6 +779,24 @@ body {
   box-shadow: 0 2px 8px rgba(2, 132, 199, 0.15);
 }
 
+.cat-pill[data-cat="WORK"].active {
+  background: #f0f9ff;
+  border-color: #0284c7;
+  box-shadow: 0 2px 10px rgba(2, 132, 199, 0.2);
+}
+
+.cat-pill[data-cat="COMMUNICATION"].active {
+  background: #f0fdf4;
+  border-color: #10b981;
+  box-shadow: 0 2px 10px rgba(16, 185, 129, 0.2);
+}
+
+.cat-pill[data-cat="IDLE"].active {
+  background: #fffbeb;
+  border-color: #f59e0b;
+  box-shadow: 0 2px 10px rgba(245, 158, 11, 0.2);
+}
+
 .pill-icon {
   font-size: 20px;
 }
@@ -1445,23 +1463,23 @@ input:checked + .slider:before {
             <div class="category-selector-group">
               <span class="selector-title">Activity Mode:</span>
               <div class="category-cards-row">
-                <button type="button" class="cat-pill active" data-cat="WORK">
-                  <span class="pill-icon"></span>
+                <button type="button" class="cat-pill active" data-cat="WORK" id="pillWork">
+                  <span class="pill-icon">💼</span>
                   <div class="pill-texts">
                     <strong>Active Work</strong>
                     <small>Productive task time</small>
                   </div>
                 </button>
 
-                <button type="button" class="cat-pill" data-cat="COMMUNICATION">
-                  <span class="pill-icon"></span>
+                <button type="button" class="cat-pill" data-cat="COMMUNICATION" id="pillMeeting">
+                  <span class="pill-icon">💬</span>
                   <div class="pill-texts">
                     <strong>Meeting / Call</strong>
                     <small>Active work (Not break)</small>
                   </div>
                 </button>
 
-                <button type="button" class="cat-pill" data-cat="IDLE">
+                <button type="button" class="cat-pill" data-cat="IDLE" id="pillBreak">
                   <span class="pill-icon">☕</span>
                   <div class="pill-texts">
                     <strong>Take a Break</strong>
@@ -1480,11 +1498,11 @@ input:checked + .slider:before {
 
               <div class="action-buttons-wrap">
                 <button type="button" id="btnPlay" class="btn-action-big start" title="Start Tracking">
-                  <span class="btn-icon"></span>
+                  <span class="btn-icon">▶️</span>
                   <span class="btn-label">START WORK</span>
                 </button>
                 <button type="button" id="btnStop" class="btn-action-big pause hidden" title="Take a Break / Pause Tracking">
-                  <span class="btn-icon"></span>
+                  <span class="btn-icon">☕</span>
                   <span class="btn-label">TAKE BREAK</span>
                 </button>
               </div>
@@ -1493,7 +1511,7 @@ input:checked + .slider:before {
             <!-- Current Task Status Banner -->
             <div class="current-task-status-banner">
               <div class="banner-left">
-                <span class="banner-bullet"></span>
+                <span class="banner-bullet">📌</span>
                 <span class="banner-task-title" id="displayTaskTitle">Ready to track work</span>
               </div>
               <span class="banner-task-duration" id="displayTaskDuration">0h 00m</span>
@@ -1505,7 +1523,7 @@ input:checked + .slider:before {
           <div class="today-breakdown-card">
             <div class="breakdown-card-header">
               <div class="breakdown-header-left">
-                <span class="breakdown-header-icon"></span>
+                <span class="breakdown-header-icon">📋</span>
                 <div>
                   <h3 class="breakdown-card-title">Today's Work & Break Timeline</h3>
                   <p class="breakdown-card-sub">Exact intervals of what work was completed from start to finish</p>
@@ -1657,20 +1675,24 @@ input:checked + .slider:before {
           <div class="pause-options">
             <label class="pause-option-item">
               <input type="radio" name="breakReason" value="Lunch Break" checked>
-              <span> Lunch / Meal Break</span>
+              <span>🍱 Lunch / Meal Break</span>
             </label>
             <label class="pause-option-item">
-              <input type="radio" name="breakReason" value="Short Break">
-              <span>☕ Short Break / Coffee</span>
+              <input type="radio" name="breakReason" value="Tea / Coffee Break">
+              <span>☕ Tea / Coffee Break</span>
             </label>
             <label class="pause-option-item">
-              <input type="radio" name="breakReason" value="Offline Work">
-              <span> Offline Work / Discussion</span>
+              <input type="radio" name="breakReason" value="Offline Discussion">
+              <span>🤝 Offline Discussion / Meeting</span>
+            </label>
+            <label class="pause-option-item">
+              <input type="radio" name="breakReason" value="Personal Break">
+              <span>🚶 Personal / Short Break</span>
             </label>
           </div>
           <div class="input-group mt-3">
             <label>Note / Reason (Optional)</label>
-            <input type="text" id="pauseCommentInput" placeholder="e.g. Quick tea break">
+            <input type="text" id="pauseCommentInput" placeholder="e.g. Lunch break with team">
           </div>
         </div>
         <div class="settings-dialog-footer">

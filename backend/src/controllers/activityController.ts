@@ -98,17 +98,17 @@ export async function uploadActivityBatch(req: AuthenticatedRequest, res: Respon
                            item.processName?.toLowerCase() === 'logonui.exe' ||
                            item.appName === 'Lock Screen';
 
-      // An activity is idle if the agent detected idle threshold, screen locked, or user paused.
-      // If mouse or keyboard input occurred during the sample, it is guaranteed ACTIVE WORK.
-      const isEffectiveIdle = !hasInput && (
-        isPaused ||
-        currentStatus === 'PAUSED' ||
+      const isExplicitPause = isPaused || currentStatus === 'PAUSED';
+      const isEffectiveIdle = isExplicitPause || (!hasInput && (
         currentStatus === 'IDLE' ||
         !!item.isIdle ||
         isLockScreen
-      );
+      ));
 
-      const activeTask = isEffectiveIdle ? 'Away / Idle Break' : (item.taskName || taskName || (isPaused ? (pauseReason || 'Break') : 'Active Task'));
+      const activeTask = isExplicitPause
+        ? (pauseReason || 'Break')
+        : (isEffectiveIdle ? 'Away / Idle Break' : (item.taskName || taskName || 'Active Task'));
+
       const { friendlyName, category } = resolveAppInfo(
         item.processName || item.appName,
         item.windowTitle,
@@ -127,7 +127,7 @@ export async function uploadActivityBatch(req: AuthenticatedRequest, res: Respon
         dateGroups[itemDate].minTime = itemRecordTime;
       }
 
-      if (!hasInput && (isPaused || currentStatus === 'PAUSED')) {
+      if (isExplicitPause) {
         dateGroups[itemDate].pause += duration;
       } else if (isEffectiveIdle) {
         dateGroups[itemDate].idle += duration;
@@ -137,9 +137,9 @@ export async function uploadActivityBatch(req: AuthenticatedRequest, res: Respon
 
       return {
         userId,
-        appName: isEffectiveIdle ? 'Away / Idle Break' : friendlyName,
+        appName: isExplicitPause ? 'Break' : (isEffectiveIdle ? 'Away / Idle Break' : friendlyName),
         processName: item.processName || item.appName,
-        windowTitle: isEffectiveIdle ? 'Screen Off / Inactivity Break' : (item.windowTitle || ''),
+        windowTitle: isExplicitPause ? (pauseReason || 'Break') : (isEffectiveIdle ? 'Screen Off / Inactivity Break' : (item.windowTitle || '')),
         domain: item.domain || null,
         url: item.url || null,
         taskName: activeTask,
@@ -235,15 +235,17 @@ export async function uploadActivityBatch(req: AuthenticatedRequest, res: Respon
                         createRecords.some(r => (r.mouseClicks && r.mouseClicks > 0) || (r.keystrokes && r.keystrokes > 0));
 
     let userStatus: 'ONLINE' | 'OFFLINE' | 'IDLE' | 'PAUSED' = 'ONLINE';
-    if (hasAnyInput) {
-      userStatus = 'ONLINE';
-    } else if (isPaused || currentStatus === 'PAUSED') {
+    if (isPaused || currentStatus === 'PAUSED') {
       userStatus = 'PAUSED';
+    } else if (hasAnyInput) {
+      userStatus = 'ONLINE';
     } else if (isLatestIdle || currentStatus === 'IDLE') {
       userStatus = 'IDLE';
     }
 
-    const activeCurrentTask = taskName || latestItem.taskName || (userStatus === 'PAUSED' ? (pauseReason || 'Break') : (userStatus === 'IDLE' ? 'Away / Idle Break' : 'Active Task'));
+    const activeCurrentTask = userStatus === 'PAUSED'
+      ? (pauseReason || 'Break')
+      : (taskName || latestItem.taskName || (userStatus === 'IDLE' ? 'Away / Idle Break' : 'Active Task'));
 
     if (!isCatchUp) {
       await prisma.user.update({
@@ -254,9 +256,9 @@ export async function uploadActivityBatch(req: AuthenticatedRequest, res: Respon
           pauseComment: userStatus === 'PAUSED' ? (pauseComment || null) : null,
           currentTask: activeCurrentTask,
           lastActiveAt: now,
-          currentApp: resolvedLatest.friendlyName,
-          currentTitle: latestItem.windowTitle || null,
-          currentDomain: latestItem.domain || null
+          currentApp: userStatus === 'PAUSED' ? 'Break' : resolvedLatest.friendlyName,
+          currentTitle: userStatus === 'PAUSED' ? (pauseReason || 'Break') : (latestItem.windowTitle || null),
+          currentDomain: userStatus === 'PAUSED' ? null : (latestItem.domain || null)
         }
       });
 

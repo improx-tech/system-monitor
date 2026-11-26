@@ -24,7 +24,7 @@ export async function getDashboardStats(req: Request, res: Response) {
 
     const totalHeadcount = employees.length;
     const onlineCount = employees.filter(e => e.status === 'ONLINE').length;
-    const idleCount = employees.filter(e => e.status === 'IDLE').length;
+    const idleCount = employees.filter(e => e.status === 'IDLE' || e.status === 'PAUSED').length;
     const offlineCount = employees.filter(e => e.status === 'OFFLINE').length;
 
     // Aggregate work hours for selected date (mathematically bounded by real elapsed time)

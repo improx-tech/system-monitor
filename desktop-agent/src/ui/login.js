@@ -1044,32 +1044,67 @@ function stopDigitalTimer() {
   }
 }
 
+function setActiveCategoryPill(category, isPausedState) {
+  catPills.forEach((p) => p.classList.remove('active'));
+  if (isPausedState) {
+    const breakPill = document.querySelector('.cat-pill[data-cat="IDLE"]');
+    if (breakPill) breakPill.classList.add('active');
+    currentCategory = 'IDLE';
+  } else if (category === 'COMMUNICATION') {
+    const meetPill = document.querySelector('.cat-pill[data-cat="COMMUNICATION"]');
+    if (meetPill) meetPill.classList.add('active');
+    currentCategory = 'COMMUNICATION';
+  } else {
+    const workPill = document.querySelector('.cat-pill[data-cat="WORK"]');
+    if (workPill) workPill.classList.add('active');
+    currentCategory = 'WORK';
+  }
+}
+
 function setRunningState(running, paused = false, pauseReason = '') {
   isRunning = running;
   isPaused = paused;
 
   if (running && !paused) {
     if (btnPlay) btnPlay.classList.add('hidden');
-    if (btnStop) btnStop.classList.remove('hidden');
+    if (btnStop) {
+      btnStop.classList.remove('hidden');
+      const stopLabel = btnStop.querySelector('.btn-label');
+      if (stopLabel) stopLabel.textContent = 'TAKE BREAK';
+      const stopIcon = btnStop.querySelector('.btn-icon');
+      if (stopIcon) stopIcon.textContent = '☕';
+    }
 
     if (liveStatusPill) {
       liveStatusPill.className = 'status-indicator-pill working';
-      if (liveStatusText) liveStatusText.textContent = 'WORKING';
+      if (liveStatusText) liveStatusText.textContent = currentCategory === 'COMMUNICATION' ? 'IN MEETING / CALL' : 'WORKING';
     }
     if (headerStatusDot) headerStatusDot.style.background = '#22c55e';
     startDigitalTimer();
   } else if (paused) {
-    if (btnPlay) btnPlay.classList.remove('hidden');
+    if (btnPlay) {
+      btnPlay.classList.remove('hidden');
+      const playLabel = btnPlay.querySelector('.btn-label');
+      if (playLabel) playLabel.textContent = 'RESUME WORK';
+      const playIcon = btnPlay.querySelector('.btn-icon');
+      if (playIcon) playIcon.textContent = '▶️';
+    }
     if (btnStop) btnStop.classList.add('hidden');
 
     if (liveStatusPill) {
       liveStatusPill.className = 'status-indicator-pill paused';
-      if (liveStatusText) liveStatusText.textContent = pauseReason ? ('PAUSED: ' + pauseReason) : 'PAUSED';
+      if (liveStatusText) liveStatusText.textContent = pauseReason ? ('ON BREAK: ' + pauseReason) : 'ON BREAK';
     }
     if (headerStatusDot) headerStatusDot.style.background = '#f59e0b';
     stopDigitalTimer();
   } else {
-    if (btnPlay) btnPlay.classList.remove('hidden');
+    if (btnPlay) {
+      btnPlay.classList.remove('hidden');
+      const playLabel = btnPlay.querySelector('.btn-label');
+      if (playLabel) playLabel.textContent = 'START WORK';
+      const playIcon = btnPlay.querySelector('.btn-icon');
+      if (playIcon) playIcon.textContent = '▶️';
+    }
     if (btnStop) btnStop.classList.add('hidden');
 
     if (liveStatusPill) {
@@ -1083,14 +1118,41 @@ function setRunningState(running, paused = false, pauseReason = '') {
 
 // Category selection
 catPills.forEach((pill) => {
-  pill.addEventListener('click', () => {
-    catPills.forEach((p) => p.classList.remove('active'));
-    pill.classList.add('active');
-    currentCategory = pill.getAttribute('data-cat') || 'WORK';
+  pill.addEventListener('click', async () => {
+    const targetCat = pill.getAttribute('data-cat') || 'WORK';
 
-    // If "Break / Lunch" is selected, trigger pause modal
-    if (currentCategory === 'IDLE' && isRunning && !isPaused) {
+    // If Take a Break is selected, show pause modal
+    if (targetCat === 'IDLE') {
       if (pauseModal) pauseModal.classList.remove('hidden');
+      return;
+    }
+
+    currentCategory = targetCat;
+    setActiveCategoryPill(targetCat, false);
+
+    const taskVal = (taskInput && taskInput.value ? taskInput.value : '').trim();
+    let effectiveTask = taskVal;
+    if (targetCat === 'COMMUNICATION' && (!effectiveTask || effectiveTask === 'General Work')) {
+      effectiveTask = 'Team / Client Meeting';
+      if (taskInput) taskInput.value = effectiveTask;
+      if (displayTaskTitle) displayTaskTitle.textContent = effectiveTask;
+    } else if (!effectiveTask) {
+      effectiveTask = 'General Work';
+    }
+
+    if (ipcRenderer) {
+      if (!isRunning) {
+        // Not tracking yet: Start tracking with this category!
+        await ipcRenderer.invoke('start-task', { taskName: effectiveTask, category: targetCat });
+        setRunningState(true, false);
+      } else if (isPaused) {
+        // Was on break: Resume tracking with this category!
+        await ipcRenderer.invoke('set-task-category', { category: targetCat, taskName: effectiveTask });
+        setRunningState(true, false);
+      } else {
+        // Already running: Switch category dynamically
+        await ipcRenderer.invoke('set-task-category', { category: targetCat, taskName: effectiveTask });
+      }
     }
   });
 });
@@ -1101,6 +1163,11 @@ let isAddingTask = false;
 async function handleStartOrAddTask() {
   if (isAddingTask) return;
   isAddingTask = true;
+
+  if (currentCategory === 'IDLE') {
+    currentCategory = 'WORK';
+  }
+  setActiveCategoryPill(currentCategory, false);
 
   const task = (taskInput && taskInput.value ? taskInput.value : 'General Work').trim();
   currentTaskName = task;
@@ -1177,14 +1244,16 @@ if (btnStop) {
 if (btnConfirmPause) {
   btnConfirmPause.addEventListener('click', async () => {
     const selected = document.querySelector('input[name="breakReason"]:checked');
-    const reason = selected ? selected.value : 'Break';
+    const reason = selected ? selected.value : 'Lunch Break';
     const comment = pauseCommentInput ? pauseCommentInput.value.trim() : '';
 
     if (ipcRenderer) {
       await ipcRenderer.invoke('stop-task', { reason, comment });
     }
     setRunningState(false, true, reason);
+    setActiveCategoryPill('IDLE', true);
     if (pauseModal) pauseModal.classList.add('hidden');
+    await loadFrontBreakdown();
   });
 }
 
@@ -1357,6 +1426,7 @@ function showDashboardView(state) {
 
   loadFrontBreakdown();
   setRunningState(state.isTracking, state.isPaused, state.pauseReason);
+  setActiveCategoryPill(state.taskCategory, state.isPaused);
 }
 
 // Refresh front breakdown every 30 seconds
@@ -1368,6 +1438,7 @@ if (ipcRenderer) {
     if (state.user) {
       isSystemIdle = !!state.isIdle;
       showDashboardView(state);
+      setActiveCategoryPill(state.taskCategory, state.isPaused);
 
       if (todayActiveTime && state.activeHoursFormatted) {
         todayActiveTime.textContent = state.activeHoursFormatted;
