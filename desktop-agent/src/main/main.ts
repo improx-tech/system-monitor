@@ -364,6 +364,11 @@ class AgentApplication {
     this.notifyUIState();
     console.log(`🟡 Tracking paused: ${this.pauseReason} (${this.pauseComment})`);
     
+    // Immediately send pause beacon to backend so dashboard updates immediately
+    this.sendPauseBeacon(this.pauseReason).catch((err) => {
+      console.warn('Failed to send pause beacon:', err);
+    });
+
     // Apply downloaded updates silently during breaks
     if (this.autoUpdater.hasPendingUpdate()) {
       console.log('⏸️ Employee paused/took a break. Applying background auto-update now...');
@@ -600,12 +605,30 @@ class AgentApplication {
       return { success: true, isTracking: true, currentTask: this.currentTask };
     });
 
-    ipcMain.handle('stop-task', (event, { reason, comment } = {}) => {
-      if (reason || comment) {
-        this.pauseTracking(reason || 'Break', comment || '');
-      } else {
-        this.pauseTracking('Break', '');
+    ipcMain.handle('set-task-category', async (event, { category, taskName }) => {
+      this.taskCategory = category || 'WORK';
+      if (taskName) {
+        this.currentTask = taskName.trim();
       }
+      if (this.isPaused && (category === 'WORK' || category === 'COMMUNICATION')) {
+        this.resumeTracking();
+      }
+      this.updateTrayMenu();
+      this.notifyUIState();
+
+      if (this.isTracking && !this.isPaused) {
+        try {
+          await this.pollAndSyncSample();
+        } catch (err) {
+          console.warn('Immediate sample sync on set-task-category error:', err);
+        }
+      }
+      return { success: true, category: this.taskCategory, isPaused: this.isPaused };
+    });
+
+    ipcMain.handle('stop-task', (event, { reason, comment } = {}) => {
+      const selectedReason = reason || 'Break';
+      this.pauseTracking(selectedReason, comment || '');
       return { success: true, isPaused: true };
     });
 
@@ -619,12 +642,20 @@ class AgentApplication {
     });
 
     ipcMain.handle('pause-agent', (event, { reason, comment }) => {
-      this.pauseTracking(reason, comment);
+      this.pauseTracking(reason || 'Break', comment || '');
       return { success: true, isPaused: true };
     });
 
-    ipcMain.handle('resume-agent', () => {
+    ipcMain.handle('resume-agent', async () => {
+      if (this.taskCategory === 'IDLE') {
+        this.taskCategory = 'WORK';
+      }
       this.resumeTracking();
+      if (this.isTracking) {
+        try {
+          await this.pollAndSyncSample();
+        } catch (err) {}
+      }
       return { success: true, isPaused: false };
     });
 
@@ -679,9 +710,15 @@ class AgentApplication {
     this.lastSample = sample;
 
     // AUTO-RESUME IF ACTIVE USER INPUT DETECTED:
-    // If mouse clicks or keys are registered, the employee is actively working!
-    if ((sample.clicks > 0 || sample.keys > 0) && this.isPaused) {
-      console.log('🟢 Active user input detected while paused -> Auto-resuming tracking!');
+    // Only auto-resume if tracking was paused automatically by Screen Lock or Laptop Sleep!
+    // Never auto-resume manual breaks (Lunch, Coffee, Offline meeting, etc.)!
+    const isAutoSleepPause =
+      this.pauseReason.includes('Screen Lock') ||
+      this.pauseReason.includes('Sleep') ||
+      this.pauseReason.includes('Auto Away');
+
+    if ((sample.clicks > 0 || sample.keys > 0) && this.isPaused && isAutoSleepPause) {
+      console.log('🟢 Active user input detected after screen unlock -> Auto-resuming tracking!');
       this.resumeTracking();
     }
 
@@ -699,25 +736,25 @@ class AgentApplication {
     const effectiveIdle = this.isPaused ? true : (hasInput || isMeetingOrProductiveTask ? false : sample.isIdle);
 
     const logItem = {
-      appName: sample.appName,
-      processName: sample.processName,
-      windowTitle: sample.windowTitle,
-      domain: sample.domain,
+      appName: this.isPaused ? 'Break' : sample.appName,
+      processName: this.isPaused ? 'Break' : sample.processName,
+      windowTitle: this.isPaused ? (this.pauseReason || 'Break') : sample.windowTitle,
+      domain: this.isPaused ? null : sample.domain,
       url: null,
-      taskName: this.currentTask,
-      category: this.taskCategory,
+      taskName: this.isPaused ? (this.pauseReason || 'Break') : this.currentTask,
+      category: this.isPaused ? 'IDLE' : this.taskCategory,
       durationSeconds: this.sampleDurationSeconds,
-      mouseClicks: sample.clicks,
-      keystrokes: sample.keys,
-      isIdle: effectiveIdle,
+      mouseClicks: this.isPaused ? 0 : sample.clicks,
+      keystrokes: this.isPaused ? 0 : sample.keys,
+      isIdle: true,
       recordedAt: new Date().toISOString()
     };
 
-    const clicksPerMin = Math.round((sample.clicks / this.sampleDurationSeconds) * 60);
-    const keysPerMin = Math.round((sample.keys / this.sampleDurationSeconds) * 60);
+    const clicksPerMin = this.isPaused ? 0 : Math.round((sample.clicks / this.sampleDurationSeconds) * 60);
+    const keysPerMin = this.isPaused ? 0 : Math.round((sample.keys / this.sampleDurationSeconds) * 60);
     const currentStatus = this.isPaused ? 'PAUSED' : (effectiveIdle ? 'IDLE' : 'ONLINE');
 
-    console.log(`📡 [20s Telemetry] Task: ${this.currentTask} | App: ${sample.appName} | Clicks: ${sample.clicks} | Keys: ${sample.keys} | Status: ${currentStatus}`);
+    console.log(`📡 [20s Telemetry] Task: ${logItem.taskName} | App: ${logItem.appName} | Clicks: ${logItem.mouseClicks} | Keys: ${logItem.keystrokes} | Status: ${currentStatus}`);
 
     const res = await this.syncService.sendActivityBatch(
       [logItem],
