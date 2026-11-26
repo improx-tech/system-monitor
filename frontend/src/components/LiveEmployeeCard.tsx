@@ -45,23 +45,30 @@ export const LiveEmployeeCard: React.FC<LiveEmployeeCardProps> = ({ employee, on
       {/* Top Header */}
       <div>
         <div className="flex items-center justify-between gap-3 mb-3">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center font-extrabold text-sm text-emerald-700 shadow-xs">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center font-extrabold text-sm text-emerald-700 shadow-xs shrink-0">
               {employee.name.charAt(0).toUpperCase()}
             </div>
-            <div>
-              <h4 className="text-sm font-bold text-slate-900 leading-tight group-hover:text-emerald-600 transition-colors">
+            <div className="min-w-0 flex-1">
+              <h4 className="text-sm font-bold text-slate-900 leading-tight group-hover:text-emerald-600 transition-colors truncate" title={employee.name}>
                 {employee.name}
               </h4>
-              <p className="text-[11px] text-slate-500 font-medium">{employee.department}</p>
+              <p className="text-[11px] text-slate-500 font-medium truncate" title={employee.department}>{employee.department}</p>
             </div>
           </div>
 
-          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-bold ${statusColor}`}>
-            <span className={`w-2 h-2 rounded-full ${dotColor} ${employee.status === 'ONLINE' ? 'animate-pulse' : ''}`} />
-            <span>
-              {employee.status === 'PAUSED'
+          <div
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-bold shrink-0 max-w-[50%] ${statusColor}`}
+            title={
+              employee.status === 'PAUSED'
                 ? `PAUSED: ${employee.pauseReason || 'Break'} ${employee.pauseComment ? `("${employee.pauseComment}")` : ''}`
+                : undefined
+            }
+          >
+            <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor} ${employee.status === 'ONLINE' ? 'animate-pulse' : ''}`} />
+            <span className="truncate">
+              {employee.status === 'PAUSED'
+                ? `PAUSED: ${employee.pauseReason || 'Break'}`
                 : employee.status === 'ONLINE'
                 ? 'WORKING'
                 : employee.status}
@@ -71,18 +78,18 @@ export const LiveEmployeeCard: React.FC<LiveEmployeeCardProps> = ({ employee, on
 
         {/* Task Name Badge (Scrin.io Style) */}
         {employee.status !== 'OFFLINE' && employee.currentTask ? (
-          <div className="mb-2.5 px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-between text-xs">
-            <div className="flex items-center gap-1.5 text-slate-700 font-bold truncate">
+          <div className="mb-2.5 px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-between text-xs min-w-0">
+            <div className="flex items-center gap-1.5 text-slate-700 font-bold truncate min-w-0 flex-1">
               <Tag className={`w-3.5 h-3.5 shrink-0 ${employee.status === 'PAUSED' ? 'text-amber-600' : 'text-emerald-600'}`} />
-              <span className="truncate">{employee.currentTask}</span>
+              <span className="truncate" title={employee.currentTask}>{employee.currentTask}</span>
             </div>
             <span className={`text-[10px] font-bold shrink-0 ml-2 ${employee.status === 'PAUSED' ? 'text-amber-700' : 'text-emerald-700'}`}>
               {employee.status === 'PAUSED' ? 'PAUSED' : 'ACTIVE'}
             </span>
           </div>
         ) : (
-          <div className="mb-2.5 px-2.5 py-1 rounded-lg bg-slate-50/50 border border-slate-200/60 flex items-center justify-between text-xs">
-            <div className="flex items-center gap-1.5 text-slate-400 font-medium truncate">
+          <div className="mb-2.5 px-2.5 py-1 rounded-lg bg-slate-50/50 border border-slate-200/60 flex items-center justify-between text-xs min-w-0">
+            <div className="flex items-center gap-1.5 text-slate-400 font-medium truncate min-w-0 flex-1">
               <Tag className="w-3.5 h-3.5 text-slate-300 shrink-0" />
               <span className="truncate">No Active Task</span>
             </div>
@@ -133,18 +140,23 @@ export const LiveEmployeeCard: React.FC<LiveEmployeeCardProps> = ({ employee, on
         </div>
 
         {/* Current Active Window & Domain */}
-        <div className="space-y-2 text-xs mb-3">
-          <div className="flex items-center gap-2 text-slate-800 bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-200">
+        <div className="space-y-2 text-xs mb-3 min-w-0">
+          <div className="flex items-center gap-2 text-slate-800 bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-200 min-w-0">
             <AppWindow className="w-3.5 h-3.5 text-sky-600 shrink-0" />
-            <span className="truncate font-semibold">
+            <span
+              className="truncate font-semibold flex-1 min-w-0"
+              title={employee.status === 'OFFLINE' ? 'None (Offline)' : (employee.currentTitle || employee.currentApp || 'Desktop')}
+            >
               {employee.status === 'OFFLINE' ? 'None (Offline)' : (employee.currentApp || 'Desktop')}
             </span>
           </div>
 
           {employee.status !== 'OFFLINE' && employee.currentDomain && (
-            <div className="flex items-center gap-2 text-slate-600 bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-200">
+            <div className="flex items-center gap-2 text-slate-600 bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-200 min-w-0">
               <Globe className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-              <span className="truncate font-medium">{employee.currentDomain}</span>
+              <span className="truncate font-medium flex-1 min-w-0" title={employee.currentDomain}>
+                {employee.currentDomain}
+              </span>
             </div>
           )}
         </div>

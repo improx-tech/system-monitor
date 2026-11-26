@@ -567,7 +567,7 @@ class AgentApplication {
       };
     });
 
-    ipcMain.handle('start-task', (event, { taskName, category }) => {
+    ipcMain.handle('start-task', async (event, { taskName, category }) => {
       this.currentTask = (taskName || 'General Work').trim();
       this.taskCategory = category || 'WORK';
       this.isPaused = false;
@@ -579,6 +579,13 @@ class AgentApplication {
         this.resumeTracking();
       }
       this.notifyUIState();
+
+      // Immediately poll and send telemetry heartbeat so new task registers in database right away
+      try {
+        await this.pollAndSyncSample();
+      } catch (err) {
+        console.warn('Immediate sample sync on start-task error:', err);
+      }
 
       // Trigger instant screenshot 2 seconds after starting work/task (if not captured recently)
       setTimeout(() => {
@@ -650,6 +657,88 @@ class AgentApplication {
     });
   }
 
+  public async pollAndSyncSample() {
+    if (!this.isTracking) return;
+    const now = Date.now();
+    const elapsedSinceLastTick = now - this.lastTickTimestamp;
+    this.lastTickTimestamp = now;
+
+    // Detect if system slept or froze between ticks (>90s gap, e.g. laptop closed)
+    if (elapsedSinceLastTick > (this.sampleDurationSeconds * 1000 + 70000)) {
+      const sleepGapSeconds = Math.round((elapsedSinceLastTick - this.sampleDurationSeconds * 1000) / 1000);
+      if (sleepGapSeconds >= 60) {
+        const gapStartTime = new Date(now - elapsedSinceLastTick);
+        console.log(`⏳ Detected ${sleepGapSeconds}s gap between ticks (laptop was asleep). Crediting as break.`);
+        await this.recordBreakTime(sleepGapSeconds, 'Laptop Sleep / Inactive Break', gapStartTime);
+        this.lastTickTimestamp = Date.now();
+        return;
+      }
+    }
+
+    const sample = await this.tracker.getSample();
+    this.lastSample = sample;
+
+    // AUTO-RESUME IF ACTIVE USER INPUT DETECTED:
+    // If mouse clicks or keys are registered, the employee is actively working!
+    if ((sample.clicks > 0 || sample.keys > 0) && this.isPaused) {
+      console.log('🟢 Active user input detected while paused -> Auto-resuming tracking!');
+      this.resumeTracking();
+    }
+
+    const lowerTask = (this.currentTask || '').toLowerCase();
+    const isMeetingOrProductiveTask =
+      this.taskCategory === 'COMMUNICATION' ||
+      lowerTask.includes('meeting') ||
+      lowerTask.includes('call') ||
+      lowerTask.includes('discussion') ||
+      lowerTask.includes('client') ||
+      lowerTask.includes('paperwork');
+
+    const hasInput = sample.clicks > 0 || sample.keys > 0;
+    // If employee has input or is in meeting, it is NEVER idle
+    const effectiveIdle = this.isPaused ? true : (hasInput || isMeetingOrProductiveTask ? false : sample.isIdle);
+
+    const logItem = {
+      appName: sample.appName,
+      processName: sample.processName,
+      windowTitle: sample.windowTitle,
+      domain: sample.domain,
+      url: null,
+      taskName: this.currentTask,
+      category: this.taskCategory,
+      durationSeconds: this.sampleDurationSeconds,
+      mouseClicks: sample.clicks,
+      keystrokes: sample.keys,
+      isIdle: effectiveIdle,
+      recordedAt: new Date().toISOString()
+    };
+
+    const clicksPerMin = Math.round((sample.clicks / this.sampleDurationSeconds) * 60);
+    const keysPerMin = Math.round((sample.keys / this.sampleDurationSeconds) * 60);
+    const currentStatus = this.isPaused ? 'PAUSED' : (effectiveIdle ? 'IDLE' : 'ONLINE');
+
+    console.log(`📡 [20s Telemetry] Task: ${this.currentTask} | App: ${sample.appName} | Clicks: ${sample.clicks} | Keys: ${sample.keys} | Status: ${currentStatus}`);
+
+    const res = await this.syncService.sendActivityBatch(
+      [logItem],
+      clicksPerMin,
+      keysPerMin,
+      currentStatus,
+      this.isPaused,
+      this.pauseReason,
+      this.pauseComment,
+      this.currentTask
+    );
+
+    if (res.success) {
+      if (typeof res.totalActiveSeconds === 'number') this.totalActiveSeconds = res.totalActiveSeconds;
+      if (typeof res.totalIdleSeconds === 'number') this.totalIdleSeconds = res.totalIdleSeconds;
+    }
+
+    this.updateTrayMenu();
+    this.notifyUIState();
+  }
+
   public startTracking() {
     if (this.isTracking) return;
     this.isTracking = true;
@@ -661,84 +750,7 @@ class AgentApplication {
     this.lastTickTimestamp = Date.now();
     // 1. Poll Native Tracker every 20 seconds
     this.activeWindowTimer = setInterval(async () => {
-      const now = Date.now();
-      const elapsedSinceLastTick = now - this.lastTickTimestamp;
-      this.lastTickTimestamp = now;
-
-      // Detect if system slept or froze between ticks (>90s gap, e.g. laptop closed)
-      if (elapsedSinceLastTick > (this.sampleDurationSeconds * 1000 + 70000)) {
-        const sleepGapSeconds = Math.round((elapsedSinceLastTick - this.sampleDurationSeconds * 1000) / 1000);
-        if (sleepGapSeconds >= 60) {
-          const gapStartTime = new Date(now - elapsedSinceLastTick);
-          console.log(`⏳ Detected ${sleepGapSeconds}s gap between ticks (laptop was asleep). Crediting as break.`);
-          await this.recordBreakTime(sleepGapSeconds, 'Laptop Sleep / Inactive Break', gapStartTime);
-          this.lastTickTimestamp = Date.now();
-          return;
-        }
-      }
-
-      const sample = await this.tracker.getSample();
-      this.lastSample = sample;
-
-      // AUTO-RESUME IF ACTIVE USER INPUT DETECTED:
-      // If mouse clicks or keys are registered, the employee is actively working!
-      if ((sample.clicks > 0 || sample.keys > 0) && this.isPaused) {
-        console.log('🟢 Active user input detected while paused -> Auto-resuming tracking!');
-        this.resumeTracking();
-      }
-
-      const lowerTask = (this.currentTask || '').toLowerCase();
-      const isMeetingOrProductiveTask =
-        this.taskCategory === 'COMMUNICATION' ||
-        lowerTask.includes('meeting') ||
-        lowerTask.includes('call') ||
-        lowerTask.includes('discussion') ||
-        lowerTask.includes('client') ||
-        lowerTask.includes('paperwork');
-
-      const hasInput = sample.clicks > 0 || sample.keys > 0;
-      // If employee has input or is in meeting, it is NEVER idle
-      const effectiveIdle = this.isPaused ? true : (hasInput || isMeetingOrProductiveTask ? false : sample.isIdle);
-
-      const logItem = {
-        appName: sample.appName,
-        processName: sample.processName,
-        windowTitle: sample.windowTitle,
-        domain: sample.domain,
-        url: null,
-        taskName: this.currentTask,
-        category: this.taskCategory,
-        durationSeconds: this.sampleDurationSeconds,
-        mouseClicks: sample.clicks,
-        keystrokes: sample.keys,
-        isIdle: effectiveIdle,
-        recordedAt: new Date().toISOString()
-      };
-
-      const clicksPerMin = Math.round((sample.clicks / this.sampleDurationSeconds) * 60);
-      const keysPerMin = Math.round((sample.keys / this.sampleDurationSeconds) * 60);
-      const currentStatus = this.isPaused ? 'PAUSED' : (effectiveIdle ? 'IDLE' : 'ONLINE');
-
-      console.log(`📡 [20s Telemetry] Task: ${this.currentTask} | App: ${sample.appName} | Clicks: ${sample.clicks} | Keys: ${sample.keys} | Status: ${currentStatus}`);
-
-      const res = await this.syncService.sendActivityBatch(
-        [logItem],
-        clicksPerMin,
-        keysPerMin,
-        currentStatus,
-        this.isPaused,
-        this.pauseReason,
-        this.pauseComment,
-        this.currentTask
-      );
-
-      if (res.success) {
-        if (typeof res.totalActiveSeconds === 'number') this.totalActiveSeconds = res.totalActiveSeconds;
-        if (typeof res.totalIdleSeconds === 'number') this.totalIdleSeconds = res.totalIdleSeconds;
-      }
-
-      this.updateTrayMenu();
-      this.notifyUIState();
+      await this.pollAndSyncSample();
     }, this.sampleDurationSeconds * 1000);
 
     // 2. Screenshot Capture Interval (Every 10 minutes)

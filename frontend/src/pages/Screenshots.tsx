@@ -170,8 +170,8 @@ export const Screenshots: React.FC = () => {
                   const timeFormatted = new Date(s.takenAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
                   return (
-                    <div className="p-3 bg-slate-50/90 border-t border-slate-100 flex items-center justify-between gap-2">
-                      <div className="min-w-0">
+                    <div className="p-3 bg-slate-50/90 border-t border-slate-100 flex items-center justify-between gap-2 min-w-0">
+                      <div className="min-w-0 flex-1">
                         <p className="text-xs font-black text-slate-900 truncate flex items-center gap-1">
                           <User className="w-3 h-3 text-sky-600 shrink-0" />
                           {s.user.name}

@@ -327,9 +327,9 @@ export const Dashboard: React.FC = () => {
                   const pct = Math.min(100, Math.round((app.durationMinutes / maxMins) * 100));
                   return (
                     <div key={idx} className="space-y-1">
-                      <div className="flex items-center justify-between text-xs font-bold text-slate-800">
-                        <span className="truncate max-w-[180px]">{app.name}</span>
-                        <span className="text-sky-600 font-extrabold">{app.durationMinutes}m</span>
+                      <div className="flex items-center justify-between text-xs font-bold text-slate-800 min-w-0">
+                        <span className="truncate flex-1 pr-2 min-w-0" title={app.name}>{app.name}</span>
+                        <span className="text-sky-600 font-extrabold shrink-0">{app.durationMinutes}m</span>
                       </div>
                       <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
                         <div
@@ -359,9 +359,9 @@ export const Dashboard: React.FC = () => {
                   const pct = Math.min(100, Math.round((w.durationMinutes / maxMins) * 100));
                   return (
                     <div key={idx} className="space-y-1">
-                      <div className="flex items-center justify-between text-xs font-bold text-slate-800">
-                        <span className="truncate max-w-[180px]">{w.domain}</span>
-                        <span className="text-indigo-600 font-extrabold">{w.durationMinutes}m</span>
+                      <div className="flex items-center justify-between text-xs font-bold text-slate-800 min-w-0">
+                        <span className="truncate flex-1 pr-2 min-w-0" title={w.domain}>{w.domain}</span>
+                        <span className="text-indigo-600 font-extrabold shrink-0">{w.durationMinutes}m</span>
                       </div>
                       <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
                         <div

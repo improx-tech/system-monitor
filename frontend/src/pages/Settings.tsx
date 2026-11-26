@@ -248,7 +248,7 @@ export const Settings: React.FC = () => {
         </div>
 
         {/* Quick-command pills */}
-        <div className="flex flex-wrap gap-2 px-4 py-2.5 bg-slate-900 border-b border-slate-700">
+        <div className="flex flex-wrap gap-2 px-4 py-2.5 bg-slate-900 border-b border-slate-700 overflow-x-auto">
           {QUICK_CMDS.map(q => (
             <button
               key={q.cmd}
@@ -263,7 +263,7 @@ export const Settings: React.FC = () => {
 
         {/* Output area */}
         <div
-          className="bg-slate-950 h-80 overflow-y-auto px-4 py-3 font-mono text-xs leading-5 select-text"
+          className="bg-slate-950 h-80 overflow-y-auto px-4 py-3 font-mono text-xs leading-5 select-text break-all whitespace-pre-wrap"
           onClick={() => inputRef.current?.focus()}
         >
           {lines.map(line => (

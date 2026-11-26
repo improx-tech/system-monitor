@@ -1426,7 +1426,7 @@ input:checked + .slider:before {
               </div>
             </div>
 
-            <!-- Task Input (Clean, No vs code prefill) -->
+            <!-- Task Input with Explicit Add Task Button -->
             <div class="tracker-input-box">
               <input
                 type="text"
@@ -1435,6 +1435,10 @@ input:checked + .slider:before {
                 placeholder="What task are you working on right now?"
                 value=""
               />
+              <button type="button" id="btnAddTask" class="btn-add-task" title="Save and start tracking this task">
+                <span id="btnAddTaskIcon">➕</span>
+                <span id="btnAddTaskText">Add Task</span>
+              </button>
             </div>
 
             <!-- 3 Clear Activity Types -->
